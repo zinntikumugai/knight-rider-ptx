@@ -1,0 +1,24 @@
+tc90522-objs:=drivers/media/dvb-frontends/tc90522.o
+qm1d1c004x-objs:=drivers/media/tuners/qm1d1c004x.o
+mxl301rf-objs:=drivers/media/tuners/mxl301rf.o
+pt3-objs:=drivers/media/pci/ptx/pt3.o
+nm131-objs:=drivers/media/tuners/nm131.o
+tda2014x-objs:=drivers/media/tuners/tda2014x.o
+pxq3pe-objs:=drivers/media/pci/ptx/pxq3pe.o
+ccflags-y += -I$(srctree)/drivers/media/dvb-core
+ccflags-y += -I$(srctree)/drivers/media/dvb-frontends
+ccflags-y += -I$(srctree)/drivers/media/dvb-core
+ccflags-y += -I$(srctree)/drivers/media/dvb-frontends
+ccflags-y += -Idrivers/media/dvb-core -Idrivers/media/dvb-frontends -Idrivers/media/tuners
+ccflags-y += -I$(srctree)/drivers/media/dvb-core
+ccflags-y += -I$(srctree)/drivers/media/dvb-frontends
+ccflags-y += -I$(srctree)/drivers/media/dvb-core
+ccflags-y += -I$(srctree)/drivers/media/dvb-frontends
+ccflags-y += -Idrivers/media/dvb-core -Idrivers/media/dvb-frontends -Idrivers/media/tuners
+
+
+
+pt3-objs := drivers/media/pci/ptx/pt3_pci.o drivers/media/pci/ptx/ptx_common.o
+
+
+pxq3pe-objs := drivers/media/pci/ptx/pxq3pe_pci.o drivers/media/pci/ptx/ptx_common.o

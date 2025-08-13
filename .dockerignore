@@ -1,0 +1,39 @@
+# Ignore built modules and object files
+*.ko
+*.o
+*.mod.c
+*.mod
+*.cmd
+.tmp_versions/
+Module.symvers
+modules.order
+
+# Ignore editor files
+*~
+*.swp
+.vscode/
+.idea/
+
+# Ignore git directory
+.git/
+.gitignore
+
+# Ignore built applications
+apps/dvb/cmds/nitdump
+apps/dvb/cmds/dumpts
+apps/dvb/cmds/dumpts2
+apps/dvb/cmds/s2scan
+apps/dvb/cmds/ptsdump
+apps/dvb/cmds/restamp
+apps/dvb/cmds/dumpeid
+apps/dvb/cmds/fixpat
+apps/dvb/cmds/fixpat2
+apps/dvb/cmds/fixpcr
+apps/dvb/cmds/jzap
+apps/dvb/cmds/tune
+apps/dvb/cmds/tcscan
+apps/dvb/cmds/tctune
+
+# Ignore temporary files
+m~
+warns~
