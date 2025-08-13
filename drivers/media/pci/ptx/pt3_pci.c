@@ -69,7 +69,7 @@ struct pt3_adap {
 			*desc_info;
 };
 
-int pt3_i2c_flush(struct pt3_card *c, u32 start_addr)
+static int pt3_i2c_flush(struct pt3_card *c, u32 start_addr)
 {
 	u32	val	= 0b0110,
 		i	= 999;
@@ -93,7 +93,7 @@ int pt3_i2c_flush(struct pt3_card *c, u32 start_addr)
 	return val & 0b0110 ? -EIO : 0;						/* ACK status */
 }
 
-int pt3_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
+static int pt3_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 {
 	enum pt3_i2c_cmd {
 		I_END,
@@ -112,7 +112,7 @@ int pt3_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 	struct ptx_card *card	= i2c_get_adapdata(i2c);
 	struct pt3_card *c	= card->priv;
 	u32	offset		= 0;
-	u8	buf;
+	u8	buf = 0;
 	bool	filled		= false;
 
 	void i2c_shoot(u8 dat)
@@ -193,14 +193,14 @@ static const struct i2c_algorithm pt3_i2c_algo = {
 	.master_xfer	= pt3_i2c_xfr,
 };
 
-void pt3_lnb(struct ptx_card *card, bool lnb)
+static void pt3_lnb(struct ptx_card *card, bool lnb)
 {
 	struct pt3_card *c = card->priv;
 
 	writel(lnb ? 15 : 12, c->bar_reg + PT3_REG_SYS_W);
 }
 
-int pt3_power(struct dvb_frontend *fe, u8 pwr)
+static int pt3_power(struct dvb_frontend *fe, u8 pwr)
 {
 	struct i2c_client	*d	= fe->demodulator_priv;
 	u8		buf[]	= {0x1E, pwr | 0b10011001};
@@ -211,7 +211,7 @@ int pt3_power(struct dvb_frontend *fe, u8 pwr)
 	return i2c_transfer(d->adapter, msg, 1) == 1 ? 0 : -EIO;
 }
 
-int pt3_dma_run(struct ptx_adap *adap, bool ON)
+static int pt3_dma_run(struct ptx_adap *adap, bool ON)
 {
 	struct pt3_adap	*p	= adap->priv;
 	void __iomem	*base	= p->dma_base;
@@ -235,7 +235,7 @@ int pt3_dma_run(struct ptx_adap *adap, bool ON)
 	return i ? 0 : -ETIMEDOUT;
 }
 
-int pt3_thread(void *dat)
+static int pt3_thread(void *dat)
 {
 	struct ptx_adap	*adap	= dat;
 	struct pt3_adap	*p	= adap->priv;
@@ -259,7 +259,7 @@ int pt3_thread(void *dat)
 	return 0;
 }
 
-void pt3_remove(struct pci_dev *pdev)
+static void pt3_remove(struct pci_dev *pdev)
 {
 	struct ptx_card	*card	= pci_get_drvdata(pdev);
 	struct pt3_card	*c;
@@ -280,7 +280,7 @@ void pt3_remove(struct pci_dev *pdev)
 			for (j = 0; j < p->ts_blk_cnt; j++) {
 				page = &p->ts_info[j];
 				if (page->dat)
-					pci_free_consistent(adap->card->pdev, page->sz, page->dat, page->adr);
+					dma_free_coherent(&adap->card->pdev->dev, page->sz, page->dat, page->adr);
 			}
 			kfree(p->ts_info);
 		}
@@ -288,7 +288,7 @@ void pt3_remove(struct pci_dev *pdev)
 			for (j = 0; j < p->desc_pg_cnt; j++) {
 				page = &p->desc_info[j];
 				if (page->dat)
-					pci_free_consistent(adap->card->pdev, page->sz, page->dat, page->adr);
+					dma_free_coherent(&adap->card->pdev->dev, page->sz, page->dat, page->adr);
 			}
 			kfree(p->desc_info);
 		}
@@ -304,7 +304,7 @@ void pt3_remove(struct pci_dev *pdev)
 		iounmap(c->bar_mem);
 }
 
-int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct ptx_adap	*adap;
 	struct pt3_card	*c;
@@ -348,14 +348,14 @@ int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			return false;
 		for (i = 0; i < p->desc_pg_cnt; i++) {						/* 4	*/
 			p->desc_info[i].sz	= DESC_PAGE_SZ;					/* 4080B, max 204 * 4 = 816 descs */
-			p->desc_info[i].dat	= pci_alloc_consistent(card->pdev, p->desc_info[i].sz, &p->desc_info[i].adr);
+			p->desc_info[i].dat	= dma_alloc_coherent(&card->pdev->dev, p->desc_info[i].sz, &p->desc_info[i].adr, GFP_KERNEL);
 			if (!p->desc_info[i].dat)
 				return false;
 			memset(p->desc_info[i].dat, 0, p->desc_info[i].sz);
 		}
 		for (i = 0; i < p->ts_blk_cnt; i++) {						/* 17	*/
 			p->ts_info[i].sz	= DESC_PAGE_SZ * TS_PAGE_CNT;			/* 1020 pkts, 4080 * 47 = 191760B, total 3259920B */
-			p->ts_info[i].dat	= pci_alloc_consistent(card->pdev, p->ts_info[i].sz, &p->ts_info[i].adr);
+			p->ts_info[i].dat	= dma_alloc_coherent(&card->pdev->dev, p->ts_info[i].sz, &p->ts_info[i].adr, GFP_KERNEL);
 			if (!p->ts_info[i].dat)
 				return false;
 			for (j = 0; j < TS_PAGE_CNT; j++) {					/* 47, total 47 * 17 = 799 pages */
