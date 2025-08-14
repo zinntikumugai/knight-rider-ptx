@@ -56,6 +56,7 @@ make test
 - 非推奨 DMA API (`pci_alloc_consistent` など) の新 API への移行
 - `strlcpy` → `strscpy` への移行
 - 関数プロトタイプ警告の修正 (`static` 化)
+- pxq3pe_pci.c: I2C 読み込み時のバッファ割り当てサイズ修正（`kzalloc(sz, ...)` → `kzalloc(msg->len, ...)`）とmutex解放処理の修正
 
 ## コード品質チェック
 

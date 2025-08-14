@@ -244,10 +244,12 @@ static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 
 		mutex_lock(&card->lock);
 		if (msg->flags & I2C_M_RD) {
-			u8 *buf	= kzalloc(sz, GFP_KERNEL);
+			u8 *buf	= kzalloc(msg->len, GFP_KERNEL);
 
-			if (!buf)
+			if (!buf) {
+				mutex_unlock(&card->lock);
 				return -ENOMEM;
+			}
 			ret	= pxq3pe_r(card, slvadr, regadr, buf, msg->len, mode);
 			memcpy(msg->buf, buf, msg->len);
 			kfree(buf);
