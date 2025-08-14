@@ -21,7 +21,7 @@ struct qm1d1c004x {
 	u8 reg[32];
 };
 
-bool qm1d1c004x_r(struct dvb_frontend *fe, u8 slvadr, u8 *dat)
+static bool qm1d1c004x_r(struct dvb_frontend *fe, u8 slvadr, u8 *dat)
 {
 	struct i2c_client	*d	= fe->demodulator_priv,
 				*t	= fe->tuner_priv;
@@ -37,7 +37,7 @@ bool qm1d1c004x_r(struct dvb_frontend *fe, u8 slvadr, u8 *dat)
 	return ret;
 }
 
-int qm1d1c004x_w(struct dvb_frontend *fe, u8 slvadr, u8 *dat, int len)
+static int qm1d1c004x_w(struct dvb_frontend *fe, u8 slvadr, u8 *dat, int len)
 {
 	struct i2c_client	*d	= fe->demodulator_priv;
 	u8			*buf	= kzalloc(len + 1, GFP_KERNEL);
@@ -55,7 +55,7 @@ int qm1d1c004x_w(struct dvb_frontend *fe, u8 slvadr, u8 *dat, int len)
 	return	ret == 1 ? 0 : -EIO;
 }
 
-int qm1d1c004x_w_tuner(struct dvb_frontend *fe, u8 adr, u8 dat)
+static int qm1d1c004x_w_tuner(struct dvb_frontend *fe, u8 adr, u8 dat)
 {
 	struct i2c_client	*t	= fe->tuner_priv;
 	struct qm1d1c004x	*q	= i2c_get_clientdata(t);
@@ -71,7 +71,7 @@ enum qm1d1c004x_agc {
 	QM1D1C004X_AGC_MANUAL,
 };
 
-int qm1d1c004x_set_agc(struct dvb_frontend *fe, enum qm1d1c004x_agc agc)
+static int qm1d1c004x_set_agc(struct dvb_frontend *fe, enum qm1d1c004x_agc agc)
 {
 	u8	dat		= (agc == QM1D1C004X_AGC_AUTO) ? 0xff : 0x00,
 		pskmsrst	= 0x01;
@@ -88,7 +88,7 @@ int qm1d1c004x_set_agc(struct dvb_frontend *fe, enum qm1d1c004x_agc agc)
 		err : qm1d1c004x_w(fe, 0x03, &pskmsrst, 1);
 }
 
-int qm1d1c004x_sleep(struct dvb_frontend *fe)
+static int qm1d1c004x_sleep(struct dvb_frontend *fe)
 {
 	u8	buf	= 1,
 		*reg	= ((struct qm1d1c004x *)fe->tuner_priv)->reg;
@@ -102,7 +102,7 @@ int qm1d1c004x_sleep(struct dvb_frontend *fe)
 		qm1d1c004x_w(fe, 0x17, &buf, 1);
 }
 
-int qm1d1c004x_wakeup(struct dvb_frontend *fe)
+static int qm1d1c004x_wakeup(struct dvb_frontend *fe)
 {
 	u8	regs[][32] = {
 			{	/* QM1D1C0042	Earthsoft PT3	*/
@@ -138,7 +138,7 @@ int qm1d1c004x_wakeup(struct dvb_frontend *fe)
 		qm1d1c004x_w_tuner(fe, 0x05, reg[0x05]);
 }
 
-int qm1d1c004x_tune(struct dvb_frontend *fe)
+static int qm1d1c004x_tune(struct dvb_frontend *fe)
 {
 	u32	fgap_tab[9][3]	= {
 		{2151000, 1, 7},	{1950000, 1, 6},	{1800000, 1, 5},
@@ -204,13 +204,12 @@ int qm1d1c004x_tune(struct dvb_frontend *fe)
 	return -ETIMEDOUT;
 }
 
-int qm1d1c004x_remove(struct i2c_client *t)
+static void qm1d1c004x_remove(struct i2c_client *t)
 {
 	kfree(i2c_get_clientdata(t));
-	return 0;
 }
 
-int qm1d1c004x_probe(struct i2c_client *t, const struct i2c_device_id *id)
+static int qm1d1c004x_probe(struct i2c_client *t)
 {
 	struct dvb_frontend	*fe	= t->dev.platform_data;
 	struct qm1d1c004x	*q	= kzalloc(sizeof(struct qm1d1c004x), GFP_KERNEL);

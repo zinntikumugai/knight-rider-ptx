@@ -7,7 +7,7 @@
 #include <media/dvb_frontend.h>
 #include "nm131.h"
 
-bool nm131_w(struct i2c_client *c, u16 slvadr, u32 val, u32 sz)
+static bool nm131_w(struct i2c_client *c, u16 slvadr, u32 val, u32 sz)
 {
 	u8	buf[]	= {0xFE, 0xCE, slvadr >> 8, slvadr & 0xFF, 0, 0, 0, 0};
 	struct i2c_msg msg[] = {
@@ -18,7 +18,7 @@ bool nm131_w(struct i2c_client *c, u16 slvadr, u32 val, u32 sz)
 	return i2c_transfer(c->adapter, msg, 1) == 1;
 }
 
-bool nm131_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
+static bool nm131_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
 {
 	u8	buf[]	= {slvadr, dat};
 	struct i2c_msg	msg[]	= {
@@ -27,7 +27,7 @@ bool nm131_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
 	return i2c_transfer(c->adapter, msg, 1) == 1;
 }
 
-bool nm131_r(struct i2c_client *c, u16 slvadr, u8 *dat, u32 sz)
+static bool nm131_r(struct i2c_client *c, u16 slvadr, u8 *dat, u32 sz)
 {
 	u8	rcmd[]	= {0xFE, 0xCF},
 		*buf	= kzalloc(sz, GFP_KERNEL);
@@ -45,7 +45,7 @@ bool nm131_r(struct i2c_client *c, u16 slvadr, u8 *dat, u32 sz)
 	return ret;
 }
 
-int nm131_tune(struct dvb_frontend *fe)
+static int nm131_tune(struct dvb_frontend *fe)
 {
 	struct vhf_filter_cutoff_codes_t {
 		u32	Hz;
@@ -177,7 +177,7 @@ int nm131_tune(struct dvb_frontend *fe)
 		0 : -EIO;
 }
 
-int nm131_probe(struct i2c_client *c, const struct i2c_device_id *id)
+static int nm131_probe(struct i2c_client *c)
 {
 	struct tnr_rf_reg_t {
 		u8 slvadr;

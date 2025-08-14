@@ -76,7 +76,7 @@ test:
 		(echo "Docker build: FAILED" && exit 1)
 	@echo ""
 	@echo "Testing build inside container..."
-	@docker run --rm ptx-build-test bash -c "cd /opt/ptx && $(MAKE) KVER=5.10.33 KDIR=/usr/src/linux-5.10.33 KBUILD=/usr/src/linux-5.10.33" && \
+	@docker run --rm ptx-build-test bash -c "cd /opt/ptx && $(MAKE) KVER=6.8.0 KDIR=/usr/src/linux-6.8 KBUILD=/usr/src/linux-6.8" && \
 		echo "Container build test: SUCCESS" || \
 		(echo "Container build test: FAILED" && exit 1)
 	@echo ""

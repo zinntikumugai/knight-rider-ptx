@@ -7,7 +7,7 @@
 #include <media/dvb_frontend.h>
 #include "tda2014x.h"
 
-int tda2014x_r(struct i2c_client *c, u8 slvadr)
+static int tda2014x_r(struct i2c_client *c, u8 slvadr)
 {
 	u8	buf[]	= {0xFE, 0xA8, slvadr},
 		rcmd[]	= {0xFE, 0xA9},
@@ -20,7 +20,7 @@ int tda2014x_r(struct i2c_client *c, u8 slvadr)
 	return i2c_transfer(c->adapter, msg, 3) == 3 ? ret : -EREMOTEIO;
 }
 
-bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *rdat)
+static bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *rdat)
 {
 	u8	mask	= nbits > 7 ? 0xFF : ((1 << nbits) - 1) << start_bit,
 		val	= tda2014x_r(c, slvadr);
@@ -31,7 +31,7 @@ bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *r
 	return true;
 }
 
-bool tda2014x_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
+static bool tda2014x_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
 {
 	u8		buf[]	= {slvadr, dat};
 	struct i2c_msg	msg[]	= {
@@ -40,7 +40,7 @@ bool tda2014x_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
 	return i2c_transfer(c->adapter, msg, 1) == 1;
 }
 
-bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 nbytes, bool rmw, u8 access, u16 wdat)
+static bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 nbytes, bool rmw, u8 access, u16 wdat)
 {
 	u16	mask	= nbits > 15 ? 0xFFFF : ((1 << nbits) - 1) << start_bit,
 		val	= mask & (wdat << start_bit);
@@ -66,7 +66,7 @@ bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 n
 	return true;
 }
 
-int tda2014x_tune(struct dvb_frontend *fe)
+static int tda2014x_tune(struct dvb_frontend *fe)
 {
 	u64 div10(u64 n, u8 pow)
 	{
@@ -252,7 +252,7 @@ LABEL_36:
 		tda2014x_w8(c, 3, 1)) * -EIO;
 }
 
-int tda2014x_probe(struct i2c_client *c, const struct i2c_device_id *id)
+static int tda2014x_probe(struct i2c_client *c)
 {
 	u8			val	= 0;
 	struct dvb_frontend	*fe	= c->dev.platform_data;

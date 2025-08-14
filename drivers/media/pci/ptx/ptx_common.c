@@ -10,7 +10,7 @@ MODULE_AUTHOR(PTX_AUTH);
 MODULE_DESCRIPTION("Common DVB registration procedures");
 MODULE_LICENSE("GPL");
 
-void ptx_lnb(struct ptx_card *card)
+static void ptx_lnb(struct ptx_card *card)
 {
 	struct ptx_adap	*adap;
 	int	i;
@@ -45,7 +45,7 @@ int ptx_wakeup(struct dvb_frontend *fe)
 	return adap->fe_wakeup ? adap->fe_wakeup(fe) : 0;
 }
 
-int ptx_stop_feed(struct dvb_demux_feed *feed)
+static int ptx_stop_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
 
@@ -55,7 +55,7 @@ int ptx_stop_feed(struct dvb_demux_feed *feed)
 	return 0;
 }
 
-int ptx_start_feed(struct dvb_demux_feed *feed)
+static int ptx_start_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
 
@@ -88,8 +88,8 @@ struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card
 		p->priv	= sz_adap_priv ? (u8 *)&card->adap[adapn] + i * sz_adap_priv : NULL;
 	}
 	if (pci_enable_device(pdev)					||
-		pci_set_dma_mask(pdev, DMA_BIT_MASK(32))		||
-		pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32))	||
+		dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))		||
+		dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32))	||
 		pci_request_regions(pdev, name)) {
 		kfree(card);
 		return NULL;
@@ -110,7 +110,7 @@ int ptx_i2c_add_adapter(struct ptx_card *card, const struct i2c_algorithm *algo)
 	return	i2c_add_adapter(i2c);
 }
 
-void ptx_unregister_subdev(struct i2c_client *c)
+static void ptx_unregister_subdev(struct i2c_client *c)
 {
 	if (!c)
 		return;
@@ -119,7 +119,7 @@ void ptx_unregister_subdev(struct i2c_client *c)
 	i2c_unregister_device(c);
 }
 
-void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 adr, char *name)
+static void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 adr, char *name)
 {
 	struct i2c_client	*c;
 	struct i2c_board_info	info = {
@@ -127,7 +127,7 @@ void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 a
 		.addr		= adr,
 	};
 
-	strlcpy(info.type, name, I2C_NAME_SIZE);
+	strscpy(info.type, name, I2C_NAME_SIZE);
 	pr_info("%s %s", __func__, info.type);
 	if (request_module("%s", info.type) < 0) {
 		pr_err("%s ERROR request_module %s", __func__, info.type);

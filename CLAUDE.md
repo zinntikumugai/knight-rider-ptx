@@ -32,22 +32,30 @@ make clean
 make uninstall  # または ./dkms.uninstall
 ```
 
-## Docker 環境でのビルド（Kernel 5.10.33）
+## Docker 環境でのビルド（Kernel 6.8.0 対応済み）
 
-このプロジェクトは Kernel 5.10.33 までの対応です。Docker を使用して対応カーネル環境でビルド・テストできます：
+このプロジェクトは Kernel 6.8.0 / Ubuntu 24.04 に対応済みです。Docker を使用してビルド・テストできます：
 
 ```bash
 # Docker イメージのビルド
 docker build -t ptx-build .
 
 # コンテナでビルド環境を起動
-docker run -it --rm -v $(pwd):/opt/knight-rider-ptx ptx-build
+docker run -it --rm ptx-build
 
 # コンテナ内でビルドとテスト
 make clean
 make
 make test
 ```
+
+### Kernel 6.8.0 対応修正内容
+
+- `media/dvb_math.h` → `linux/int_log.h` への移行
+- i2c_driver の probe/remove 関数シグネチャ変更対応
+- 非推奨 DMA API (`pci_alloc_consistent` など) の新 API への移行
+- `strlcpy` → `strscpy` への移行
+- 関数プロトタイプ警告の修正 (`static` 化)
 
 ## コード品質チェック
 

@@ -1,5 +1,5 @@
-# Ubuntu 20.04 LTS is compatible with kernel 5.10.x series
-FROM ubuntu:20.04
+# Ubuntu 24.04 LTS for kernel 6.8.0 compatibility
+FROM ubuntu:24.04
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,15 +24,15 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and prepare kernel 5.10.33 source for module building
+# Download and prepare kernel 6.8.0 source for module building
 WORKDIR /usr/src
-RUN wget https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.10.33.tar.xz && \
-    tar -xf linux-5.10.33.tar.xz && \
-    rm linux-5.10.33.tar.xz && \
-    ln -s linux-5.10.33 linux
+RUN wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.tar.xz && \
+    tar -xf linux-6.8.tar.xz && \
+    rm linux-6.8.tar.xz && \
+    ln -s linux-6.8 linux
 
 # Prepare kernel source for module building
-WORKDIR /usr/src/linux-5.10.33
+WORKDIR /usr/src/linux-6.8
 RUN make defconfig && \
     make prepare && \
     make modules_prepare
@@ -45,9 +45,9 @@ COPY . /opt/ptx/
 
 # Create a script to set up the build environment
 RUN echo '#!/bin/bash\n\
-export KVER=5.10.33\n\
-export KDIR=/usr/src/linux-5.10.33\n\
-export KBUILD=/usr/src/linux-5.10.33\n\
+export KVER=6.8.0\n\
+export KDIR=/usr/src/linux-6.8\n\
+export KBUILD=/usr/src/linux-6.8\n\
 echo "Build environment set for kernel $KVER"\n\
 echo "KDIR=$KDIR"\n\
 echo "KBUILD=$KBUILD"\n\

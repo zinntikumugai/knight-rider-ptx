@@ -90,7 +90,7 @@ struct pxq3pe_adap {
 		sBufByteCnt;
 };
 
-bool pxq3pe_i2c_clean(void __iomem *bar)
+static bool pxq3pe_i2c_clean(void __iomem *bar)
 {
 	if ((readl(bar + PXQ3PE_I2C_FIFO_STAT) & 0x1F) != 0x10 || readl(bar + PXQ3PE_I2C_FIFO_STAT) & 0x1F00)
 		return false;
@@ -98,7 +98,7 @@ bool pxq3pe_i2c_clean(void __iomem *bar)
 	return true;
 }
 
-bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen, u8 mode)
+static bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen, u8 mode)
 {
 	struct pxq3pe_card *c	= card->priv;
 	void __iomem	*bar	= c->bar;
@@ -155,7 +155,7 @@ bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen,
 	return j < 1000 ? !(readl(bar + PXQ3PE_I2C_CTL_STAT) & 0x280000) : false;
 }
 
-bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen, u8 mode)
+static bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen, u8 mode)
 {
 	struct pxq3pe_card *c	= card->priv;
 	void __iomem	*bar	= c->bar;
@@ -226,7 +226,7 @@ bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen,
 	return !(readl(bar + PXQ3PE_I2C_FIFO_STAT) & 0x1F00) && ret;
 }
 
-int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
+static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 {
 	struct ptx_card	*card	= i2c_get_adapdata(i2c);
 	u8		i;
@@ -258,7 +258,7 @@ int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 	return i;
 }
 
-bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
+static bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
 {
 	u8	val;
 	struct i2c_msg msg[] = {
@@ -270,7 +270,7 @@ bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
 		(val = (mask & dat) | (val & ~mask), i2c_transfer(&card->i2c, msg + 1, 1) == 1);
 }
 
-void pxq3pe_w_gpio1(struct ptx_card *card, u8 dat, u8 mask)
+static void pxq3pe_w_gpio1(struct ptx_card *card, u8 dat, u8 mask)
 {
 	struct pxq3pe_card *c = card->priv;
 
@@ -278,7 +278,7 @@ void pxq3pe_w_gpio1(struct ptx_card *card, u8 dat, u8 mask)
 	writeb((readb(c->bar + 0x890) & ~mask) | ((dat << 3) & mask), c->bar + 0x890);
 }
 
-void pxq3pe_w_gpio0(struct ptx_card *card, u8 dat, u8 mask)
+static void pxq3pe_w_gpio0(struct ptx_card *card, u8 dat, u8 mask)
 {
 	struct pxq3pe_card *c = card->priv;
 
@@ -286,7 +286,7 @@ void pxq3pe_w_gpio0(struct ptx_card *card, u8 dat, u8 mask)
 	writeb((mask & dat) | (readb(c->bar + 0x894) & ~mask), c->bar + 0x894);
 }
 
-void pxq3pe_power(struct ptx_card *card, bool ON)
+static void pxq3pe_power(struct ptx_card *card, bool ON)
 {
 	if (ON) {
 		pxq3pe_w_gpio0(card, 1, 1);
@@ -307,7 +307,7 @@ void pxq3pe_power(struct ptx_card *card, bool ON)
 	}
 }
 
-irqreturn_t pxq3pe_irq(int irq, void *ctx)
+static irqreturn_t pxq3pe_irq(int irq, void *ctx)
 {
 	struct ptx_card		*card	= ctx;
 	struct pxq3pe_card	*c	= card->priv;
@@ -368,7 +368,7 @@ irqreturn_t pxq3pe_irq(int irq, void *ctx)
 	return IRQ_HANDLED;
 }
 
-int pxq3pe_thread(void *dat)
+static int pxq3pe_thread(void *dat)
 {
 	struct ptx_adap		*adap	= dat;
 	struct pxq3pe_adap	*p	= adap->priv;
@@ -402,7 +402,7 @@ int pxq3pe_thread(void *dat)
 	return 0;
 }
 
-int pxq3pe_dma(struct ptx_adap *adap, bool ON)
+static int pxq3pe_dma(struct ptx_adap *adap, bool ON)
 {
 	struct ptx_card		*card	= adap->card;
 	struct pxq3pe_card	*c	= card->priv;
@@ -456,12 +456,12 @@ int pxq3pe_dma(struct ptx_adap *adap, bool ON)
 	return 0;
 }
 
-void pxq3pe_lnb(struct ptx_card *card, bool lnb)
+static void pxq3pe_lnb(struct ptx_card *card, bool lnb)
 {
 	pxq3pe_w_gpio2(card, lnb ? 0x20 : 0, 0x20);
 }
 
-void pxq3pe_remove(struct pci_dev *pdev)
+static void pxq3pe_remove(struct pci_dev *pdev)
 {
 	struct ptx_card		*card	= pci_get_drvdata(pdev);
 	struct ptx_adap		*adap;

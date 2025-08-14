@@ -13,11 +13,11 @@
 	GNU General Public License for more details.
  */
 
-#include <media/dvb_math.h>
+#include <linux/int_log.h>
 #include <media/dvb_frontend.h>
 #include "tc90522.h"
 
-bool tc90522_r(struct i2c_client *c, u8 slvadr, u8 *buf, u8 len)
+static bool tc90522_r(struct i2c_client *c, u8 slvadr, u8 *buf, u8 len)
 {
 	struct i2c_msg msg[] = {
 		{.addr = 0x80 | c->addr,	.flags = 0,		.buf = &slvadr,	.len = 1,},
@@ -26,7 +26,7 @@ bool tc90522_r(struct i2c_client *c, u8 slvadr, u8 *buf, u8 len)
 	return i2c_transfer(c->adapter, msg, 2) == 2;
 }
 
-bool tc90522_w(struct i2c_client *c, u8 slvadr, u8 dat)
+static bool tc90522_w(struct i2c_client *c, u8 slvadr, u8 dat)
 {
 	u8 buf[] = {slvadr, dat};
 	struct i2c_msg msg[] = {
@@ -35,7 +35,7 @@ bool tc90522_w(struct i2c_client *c, u8 slvadr, u8 dat)
 	return i2c_transfer(c->adapter, msg, 1) == 1;
 }
 
-u64 tc90522_n2int(const u8 *data, u8 n)		/* convert n_bytes data from stream (network byte order) to integer */
+static u64 tc90522_n2int(const u8 *data, u8 n)		/* convert n_bytes data from stream (network byte order) to integer */
 {						/* can't use <arpa/inet.h>'s ntoh*() as sometimes n = 3,5,...       */
 	u32 i, val = 0;
 
@@ -46,7 +46,7 @@ u64 tc90522_n2int(const u8 *data, u8 n)		/* convert n_bytes data from stream (ne
 	return val;
 }
 
-int tc90522_cn_raw(struct dvb_frontend *fe, u16 *raw)	/* for DVBv3 compatibility	*/
+static int tc90522_cn_raw(struct dvb_frontend *fe, u16 *raw)	/* for DVBv3 compatibility	*/
 {
 	u8	buf[3],
 		len	= fe->dtv_property_cache.delivery_system == SYS_ISDBS ? 2 : 3,
@@ -60,14 +60,14 @@ int tc90522_cn_raw(struct dvb_frontend *fe, u16 *raw)	/* for DVBv3 compatibility
 	return cn;
 }
 
-int tc90522_status(struct dvb_frontend *fe, enum fe_status *stat)
+static int tc90522_status(struct dvb_frontend *fe, enum fe_status *stat)
 {
 	enum fe_status			*festat	= i2c_get_clientdata(fe->demodulator_priv);
 	struct dtv_frontend_properties	*c	= &fe->dtv_property_cache;
 	u16	v16;
 	s64	raw	= tc90522_cn_raw(fe, &v16),
-		x,
-		y;
+		x = 0,
+		y = 0;
 
 	s64 cn_s(void)	/* @ .0001 dB */
 	{
@@ -102,12 +102,12 @@ int tc90522_status(struct dvb_frontend *fe, enum fe_status *stat)
 	return *festat;
 }
 
-enum dvbfe_algo tc90522_get_frontend_algo(struct dvb_frontend *fe)
+static enum dvbfe_algo tc90522_get_frontend_algo(struct dvb_frontend *fe)
 {
 	return DVBFE_ALGO_HW;
 }
 
-int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u32 *delay, enum fe_status *stat)
+static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u32 *delay, enum fe_status *stat)
 {
 	u32 fno2kHz(u32 fno)					// BS/CS110 base freq 10678000 kHz
 	{
@@ -228,7 +228,7 @@ static struct dvb_frontend_ops tc90522_ops = {
 	.tune		= tc90522_tune,
 };
 
-int tc90522_probe(struct i2c_client *c, const struct i2c_device_id *id)
+static int tc90522_probe(struct i2c_client *c)
 {
 	struct dvb_frontend	*fe	= c->dev.platform_data;
 	static enum fe_status	festat	= 0;
