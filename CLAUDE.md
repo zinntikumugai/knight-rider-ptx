@@ -111,3 +111,15 @@ DVB 版ツール (`apps/dvb/cmds/`):
 - `jzap`, `tune`, `tctune`: チューニング
 
 ビルド: `cd apps/dvb/cmds && make`
+
+## CI/CD
+
+### GitHub Actions
+
+`.github/workflows/build-test.yml` で自動ビルドテストが実行されます：
+
+- **トリガー**: push, pull request, 手動実行
+- **テスト内容**: Docker コンテナ内でのカーネルモジュールビルド
+- **成功判定**: オブジェクトファイル（.o）の生成を確認
+
+注: CI 環境では kernel symbols がないため、最終的なモジュールリンクは失敗する場合がありますが、コンパイル段階の成功をもって合格とします。
