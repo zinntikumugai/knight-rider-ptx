@@ -104,7 +104,7 @@ int ptx_i2c_add_adapter(struct ptx_card *card, const struct i2c_algorithm *algo)
 
 	i2c->algo	= algo;
 	i2c->dev.parent	= &card->pdev->dev;
-	strcpy(i2c->name, card->name);
+	strscpy(i2c->name, card->name, sizeof(i2c->name));
 	i2c_set_adapdata(i2c, card);
 	mutex_init(&card->lock);
 	return	i2c_add_adapter(i2c);
