@@ -10,21 +10,23 @@ MODULE_AUTHOR(PTX_AUTH);
 MODULE_DESCRIPTION("Common DVB registration procedures");
 MODULE_LICENSE("GPL");
 
-static void ptx_lnb(struct ptx_card *card)
+static void ptx_lnb(struct ptx_card *card, enum fe_sec_voltage voltage)
+{
+	if (card->lnb_vol != voltage) {
+		card->lnb(card, voltage);
+		card->lnb_vol = voltage;
+	}
+}
+
+static void ptx_lnb_auto(struct ptx_card *card)
 {
 	struct ptx_adap	*adap;
 	int	i;
-	bool	lnb = false;
 
 	for (i = 0, adap = card->adap; adap->fe && i < card->adapn; i++, adap++)
-		if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS && adap->ON) {
-			lnb = true;
-			break;
-	}
-	if (card->lnbON != lnb) {
-		card->lnb(card, lnb);
-		card->lnbON = lnb;
-	}
+		if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS && adap->ON)
+			return;
+	ptx_lnb(card, SEC_VOLTAGE_OFF);
 }
 
 int ptx_sleep(struct dvb_frontend *fe)
@@ -32,7 +34,7 @@ int ptx_sleep(struct dvb_frontend *fe)
 	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
 
 	adap->ON = false;
-	ptx_lnb(adap->card);
+	ptx_lnb_auto(adap->card);
 	return adap->fe_sleep ? adap->fe_sleep(fe) : 0;
 }
 
@@ -41,8 +43,23 @@ int ptx_wakeup(struct dvb_frontend *fe)
 	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
 
 	adap->ON = true;
-	ptx_lnb(adap->card);
+	if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS)
+		ptx_lnb(adap->card, SEC_VOLTAGE_13);
 	return adap->fe_wakeup ? adap->fe_wakeup(fe) : 0;
+}
+
+int ptx_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
+{
+	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
+
+	ptx_lnb(adap->card, voltage);
+	return 0;
+}
+
+/* BS/CS110 does not use 22kHz tone (no DiSEqC) */
+static int ptx_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
+{
+	return 0;
 }
 
 static int ptx_stop_feed(struct dvb_demux_feed *feed)
@@ -67,7 +84,7 @@ static int ptx_start_feed(struct dvb_demux_feed *feed)
 }
 
 struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card_priv, u32 sz_adap_priv,
-			void (*lnb)(struct ptx_card *, bool))
+			void (*lnb)(struct ptx_card *, enum fe_sec_voltage))
 {
 	u8 i;
 	struct ptx_card *card = kzalloc(sizeof(struct ptx_card) + sz_card_priv
@@ -79,7 +96,7 @@ struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card
 	card->pdev	= pdev;
 	card->adapn	= adapn;
 	card->name	= name;
-	card->lnbON	= true;
+	card->lnb_vol	= SEC_VOLTAGE_13;
 	card->lnb	= lnb;
 	for (i = 0; i < adapn; i++) {
 		struct ptx_adap *p = &card->adap[i];
@@ -241,6 +258,10 @@ int ptx_register_adap(struct ptx_card *card, const struct ptx_subdev_info *info,
 		adap->fe_wakeup		= adap->fe->ops.init;
 		adap->fe->ops.sleep	= ptx_sleep;
 		adap->fe->ops.init	= ptx_wakeup;
+		if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS) {
+			adap->fe->ops.set_voltage	= ptx_set_voltage;
+			adap->fe->ops.set_tone		= ptx_set_tone;
+		}
 		pr_info("%s %s:%d:%s adapter %d", __func__, card->name, i,
 			adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS ? "ISDBS" :
 			adap->fe->dtv_property_cache.delivery_system == SYS_ISDBT ? "ISDBT" : "UNKNOWN", num);

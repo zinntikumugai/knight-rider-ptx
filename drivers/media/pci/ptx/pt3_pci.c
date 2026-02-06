@@ -193,11 +193,14 @@ static const struct i2c_algorithm pt3_i2c_algo = {
 	.master_xfer	= pt3_i2c_xfr,
 };
 
-static void pt3_lnb(struct ptx_card *card, bool lnb)
+static void pt3_lnb(struct ptx_card *card, enum fe_sec_voltage voltage)
 {
 	struct pt3_card *c = card->priv;
+	/* LNB_SETTINGS: OFF=12(0V), SEC_VOLTAGE_13=13(11V/RHCP), SEC_VOLTAGE_18=15(15V/LHCP) */
+	u32 val = voltage == SEC_VOLTAGE_18 ? 15 :
+		  voltage == SEC_VOLTAGE_13 ? 13 : 12;
 
-	writel(lnb ? 15 : 12, c->bar_reg + PT3_REG_SYS_W);
+	writel(val, c->bar_reg + PT3_REG_SYS_W);
 }
 
 static int pt3_power(struct dvb_frontend *fe, u8 pwr)

@@ -458,9 +458,9 @@ static int pxq3pe_dma(struct ptx_adap *adap, bool ON)
 	return 0;
 }
 
-static void pxq3pe_lnb(struct ptx_card *card, bool lnb)
+static void pxq3pe_lnb(struct ptx_card *card, enum fe_sec_voltage voltage)
 {
-	pxq3pe_w_gpio2(card, lnb ? 0x20 : 0, 0x20);
+	pxq3pe_w_gpio2(card, voltage == SEC_VOLTAGE_OFF ? 0 : 0x20, 0x20);
 }
 
 static void pxq3pe_remove(struct pci_dev *pdev)
