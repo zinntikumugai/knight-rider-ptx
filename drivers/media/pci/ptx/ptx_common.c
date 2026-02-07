@@ -183,6 +183,11 @@ struct dvb_frontend *ptx_register_fe(struct i2c_adapter *i2c, struct dvb_adapter
 	ptx_register_subdev(i2c, fe, info->tuner_addr, info->tuner_name);
 	for (i = 0; i < MAX_DELSYS; i++)
 		fe->ops.delsys[i] = info->delsys[i];
+	if (info->delsys[0] == SYS_ISDBS) {
+		fe->ops.set_voltage	= ptx_set_voltage;
+		fe->ops.set_tone	= ptx_set_tone;
+	}
+	pr_info("%s fe=%px set_voltage=%ps", __func__, fe, fe->ops.set_voltage);
 	if (!fe->demodulator_priv || !fe->tuner_priv || (dvb && dvb_register_frontend(dvb, fe))) {
 		ptx_unregister_fe(fe);
 		return	NULL;
@@ -258,10 +263,6 @@ int ptx_register_adap(struct ptx_card *card, const struct ptx_subdev_info *info,
 		adap->fe_wakeup		= adap->fe->ops.init;
 		adap->fe->ops.sleep	= ptx_sleep;
 		adap->fe->ops.init	= ptx_wakeup;
-		if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS) {
-			adap->fe->ops.set_voltage	= ptx_set_voltage;
-			adap->fe->ops.set_tone		= ptx_set_tone;
-		}
 		pr_info("%s %s:%d:%s adapter %d", __func__, card->name, i,
 			adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS ? "ISDBS" :
 			adap->fe->dtv_property_cache.delivery_system == SYS_ISDBT ? "ISDBT" : "UNKNOWN", num);
