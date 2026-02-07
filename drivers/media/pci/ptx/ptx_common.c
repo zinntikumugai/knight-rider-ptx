@@ -52,8 +52,18 @@ int ptx_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
 {
 	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
 
-	ptx_lnb(adap->card, voltage);
-	return 0;
+	pr_info("ptx: set_voltage called v=%d\n", voltage);
+	switch (voltage) {
+	case SEC_VOLTAGE_13:	/* 0: 11V RHCP */
+	case SEC_VOLTAGE_18:	/* 1: 15V LHCP */
+	case SEC_VOLTAGE_OFF:	/* 2: 0V OFF */
+		ptx_lnb(adap->card, voltage);
+		pr_info("ptx: set_voltage ret=0\n");
+		return 0;
+	default:
+		pr_err("ptx: set_voltage invalid voltage=%d\n", voltage);
+		return -EINVAL;
+	}
 }
 
 /* BS/CS110 does not use 22kHz tone (no DiSEqC) */
