@@ -155,6 +155,10 @@ static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u3
 				cnt	= 999;
 	u8			data[16];
 
+	pr_info("tc90522: tune delsys=%d freq=%u stream_id=%u retune=%d\n",
+		fe->dtv_property_cache.delivery_system,
+		fe->dtv_property_cache.frequency,
+		fe->dtv_property_cache.stream_id, retune);
 	if (!retune)
 		return 0;
 	*festat = 0;
