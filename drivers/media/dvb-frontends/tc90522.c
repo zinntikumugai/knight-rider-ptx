@@ -223,8 +223,8 @@ static struct dvb_frontend_ops tc90522_ops = {
 		.name = TC90522_MODNAME,
 		.caps = FE_CAN_INVERSION_AUTO | FE_CAN_FEC_AUTO | FE_CAN_QAM_AUTO | FE_CAN_MULTISTREAM |
 			FE_CAN_TRANSMISSION_MODE_AUTO | FE_CAN_GUARD_INTERVAL_AUTO | FE_CAN_HIERARCHY_AUTO,
-		.frequency_min_hz	= 1,		// actual limit settings are set by .tune
-		.frequency_max_hz	= 3224000000,	// ISDB-S3 max 3224 MHz
+		.frequency_min_hz	= 0,		// actual limit settings are set by .tune
+		.frequency_max_hz	= 0,		// s_kHz/t_Hz in .tune handle normalization
 	},
 	.get_frontend_algo = tc90522_get_frontend_algo,
 	.read_snr	= tc90522_cn_raw,
