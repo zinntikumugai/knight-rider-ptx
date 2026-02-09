@@ -48,30 +48,6 @@ int ptx_wakeup(struct dvb_frontend *fe)
 	return adap->fe_wakeup ? adap->fe_wakeup(fe) : 0;
 }
 
-int ptx_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
-{
-	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
-
-	pr_info("ptx: set_voltage called v=%d\n", voltage);
-	switch (voltage) {
-	case SEC_VOLTAGE_13:	/* 0: 11V RHCP */
-	case SEC_VOLTAGE_18:	/* 1: 15V LHCP */
-	case SEC_VOLTAGE_OFF:	/* 2: 0V OFF */
-		ptx_lnb(adap->card, voltage);
-		pr_info("ptx: set_voltage ret=0\n");
-		return 0;
-	default:
-		pr_err("ptx: set_voltage invalid voltage=%d\n", voltage);
-		return -EINVAL;
-	}
-}
-
-/* BS/CS110 does not use 22kHz tone (no DiSEqC) */
-static int ptx_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
-{
-	return 0;
-}
-
 static int ptx_stop_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
@@ -193,11 +169,6 @@ struct dvb_frontend *ptx_register_fe(struct i2c_adapter *i2c, struct dvb_adapter
 	ptx_register_subdev(i2c, fe, info->tuner_addr, info->tuner_name);
 	for (i = 0; i < MAX_DELSYS; i++)
 		fe->ops.delsys[i] = info->delsys[i];
-	if (info->delsys[0] == SYS_ISDBS) {
-		fe->ops.set_voltage	= ptx_set_voltage;
-		fe->ops.set_tone	= ptx_set_tone;
-	}
-	pr_info("%s fe=%px set_voltage=%ps", __func__, fe, fe->ops.set_voltage);
 	if (!fe->demodulator_priv || !fe->tuner_priv || (dvb && dvb_register_frontend(dvb, fe))) {
 		ptx_unregister_fe(fe);
 		return	NULL;

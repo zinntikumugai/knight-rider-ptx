@@ -62,7 +62,6 @@ struct ptx_adap {
 
 struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card_priv, u32 sz_adap_priv,
 			void (*lnb)(struct ptx_card *, enum fe_sec_voltage));
-int ptx_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage);
 int ptx_sleep(struct dvb_frontend *fe);
 int ptx_wakeup(struct dvb_frontend *fe);
 int ptx_i2c_add_adapter(struct ptx_card *card, const struct i2c_algorithm *algo);
