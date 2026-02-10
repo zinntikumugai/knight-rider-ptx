@@ -223,8 +223,8 @@ static struct dvb_frontend_ops tc90522_ops = {
 		.name = TC90522_MODNAME,
 		.caps = FE_CAN_INVERSION_AUTO | FE_CAN_FEC_AUTO | FE_CAN_QAM_AUTO | FE_CAN_MULTISTREAM |
 			FE_CAN_TRANSMISSION_MODE_AUTO | FE_CAN_GUARD_INTERVAL_AUTO | FE_CAN_HIERARCHY_AUTO,
-		.frequency_min_hz	= 0,		// disabled: libdvbv5 LNB LO underflow handled in s_kHz()
-		.frequency_max_hz	= 0,		// s_kHz/t_Hz in .tune handle normalization
+		.frequency_min_hz	= 0,		// set per-delsys in ptx_register_fe()
+		.frequency_max_hz	= 0,		// ISDB-S: 999(/kHz=0), ISDB-T: 1GHz
 	},
 	.get_frontend_algo = tc90522_get_frontend_algo,
 	.read_snr	= tc90522_cn_raw,

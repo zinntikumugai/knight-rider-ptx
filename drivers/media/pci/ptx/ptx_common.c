@@ -191,8 +191,13 @@ struct dvb_frontend *ptx_register_fe(struct i2c_adapter *i2c, struct dvb_adapter
 	for (i = 0; i < MAX_DELSYS; i++)
 		fe->ops.delsys[i] = info->delsys[i];
 	if (info->delsys[0] == SYS_ISDBS) {
-		fe->ops.set_voltage	= ptx_set_voltage;
-		fe->ops.set_tone	= ptx_set_tone;
+		fe->ops.set_voltage		= ptx_set_voltage;
+		fe->ops.set_tone		= ptx_set_tone;
+		fe->ops.info.frequency_min_hz	= 1;		/* /kHz=0: skip range check	*/
+		fe->ops.info.frequency_max_hz	= 999;		/* /kHz=0: LNB underflow safe	*/
+	} else {
+		fe->ops.info.frequency_min_hz	= 1;		/* ch num (1~) passthrough	*/
+		fe->ops.info.frequency_max_hz	= 1000000000;	/* 1 GHz: all ISDB-T bands	*/
 	}
 	if (!fe->demodulator_priv || !fe->tuner_priv || (dvb && dvb_register_frontend(dvb, fe))) {
 		ptx_unregister_fe(fe);
