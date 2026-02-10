@@ -122,8 +122,12 @@ static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u3
 
 	void s_kHz(u32 *f)
 	{
-		*f =	*f > 3224000 ? fno2kHz(14)	:	/* max kHz, CNN	*/
-			*f >= 1049480 ? *f		:	/* min real kHz	*/
+		if (*f > 3224000) {			/* libdvbv5 LNB LO underflow or out of range */
+			u32 recovered = *f + 10678000;	/* reverse LO subtraction via u32 wrap	*/
+			*f = (recovered >= 1049480 && recovered <= 3224000) ? recovered : fno2kHz(14);
+			return;
+		}
+		*f =	*f >= 1049480 ? *f		:	/* min real kHz	*/
 			*f > 50 ? fno2kHz(4)		:	/* BS11 etc.	*/
 			fno2kHz(*f - 1);			// BS:1-25 CS:26-50
 	}
@@ -219,8 +223,8 @@ static struct dvb_frontend_ops tc90522_ops = {
 		.name = TC90522_MODNAME,
 		.caps = FE_CAN_INVERSION_AUTO | FE_CAN_FEC_AUTO | FE_CAN_QAM_AUTO | FE_CAN_MULTISTREAM |
 			FE_CAN_TRANSMISSION_MODE_AUTO | FE_CAN_GUARD_INTERVAL_AUTO | FE_CAN_HIERARCHY_AUTO,
-		.frequency_min_hz	= 1,		// actual limit settings are set by .tune
-		.frequency_max_hz	= 3224000000,	// ISDB-S3 max 3224 MHz
+		.frequency_min_hz	= 0,		// disabled: libdvbv5 LNB LO underflow handled in s_kHz()
+		.frequency_max_hz	= 0,		// s_kHz/t_Hz in .tune handle normalization
 	},
 	.get_frontend_algo = tc90522_get_frontend_algo,
 	.read_snr	= tc90522_cn_raw,
