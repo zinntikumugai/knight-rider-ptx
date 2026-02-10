@@ -107,52 +107,52 @@ static enum dvbfe_algo tc90522_get_frontend_algo(struct dvb_frontend *fe)
 	return DVBFE_ALGO_HW;
 }
 
-static u32 fno2kHz(u32 fno)					// BS/CS110 base freq 10678000 kHz
-{
-	if (fno < 12)
-		return 1049480 + 38360 * fno;			/* 00-11 BS	right	odd	*/
-	else if (fno < 23)
-		return 1068660 + 38360 * (fno - 12);		/* 12-22 BS	left	even	*/
-	else if (fno < 35)
-		return 1613000 + 40000 * (fno - 23);		/* 23-34 CS110	right	even	*/
-	return 1553000 + 40000 * (fno - 35);			/* 35-47 CS110	left	odd	*/
-}
-
-static void s_kHz(u32 *f)
-{
-	if (*f > 3224000) {				/* libdvbv5 LNB LO underflow or out of range */
-		u32 recovered = *f + 10678000;		/* reverse LO subtraction via u32 wrap	*/
-		*f = (recovered >= 1049480 && recovered <= 3224000) ? recovered : fno2kHz(14);
-		return;
-	}
-	*f =	*f >= 1049480 ? *f		:	/* min real kHz	*/
-		*f > 50 ? fno2kHz(4)		:	/* BS11 etc.	*/
-		fno2kHz(*f - 1);			// BS:1-25 CS:26-50
-}
-
-static u32 fno2Hz(u32 fno)
-{
-	return	(fno > 112 ? 557 : 93 + 6 * fno + (fno < 12 ? 0 : fno < 17 ? 2 : fno < 63 ? 0 : 2)) * 1000000 + 142857;
-}
-
-static void t_Hz(u32 *f)
-{
-	*f =	*f >= 90000000	? *f			:	/* real_freq Hz	*/
-		*f > 255	? fno2Hz(77)		:	/* NHK		*/
-		*f > 127	? fno2Hz(*f - 128)	:	/* freqno (IO#)	*/
-		*f > 63	? (*f -= 64,				/* CATV		*/
-			*f > 22	? fno2Hz(*f - 1)	:	/* C23-C62	*/
-			*f > 12	? fno2Hz(*f - 10)	:	/* C13-C22	*/
-			fno2Hz(77))			:
-		*f > 62	? fno2Hz(77)			:
-		*f > 12	? fno2Hz(*f + 50)		:	/* 13-62	*/
-		*f > 3	? fno2Hz(*f +  9)		:	/*  4-12	*/
-		*f	? fno2Hz(*f -  1)		:	/*  1-3		*/
-		fno2Hz(77);
-}
-
 static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u32 *delay, enum fe_status *stat)
 {
+	u32 fno2kHz(u32 fno)					// BS/CS110 base freq 10678000 kHz
+	{
+		if (fno < 12)
+			return 1049480 + 38360 * fno;		/* 00-11 BS	right	odd	*/
+		else if (fno < 23)
+			return 1068660 + 38360 * (fno - 12);	/* 12-22 BS	left	even	*/
+		else if (fno < 35)
+			return 1613000 + 40000 * (fno - 23);	/* 23-34 CS110	right	even	*/
+		return 1553000 + 40000 * (fno - 35);		/* 35-47 CS110	left	odd	*/
+	}
+
+	void s_kHz(u32 *f)
+	{
+		if (*f > 3224000) {			/* libdvbv5 LNB LO underflow or out of range */
+			u32 recovered = *f + 10678000;	/* reverse LO subtraction via u32 wrap	*/
+			*f = (recovered >= 1049480 && recovered <= 3224000) ? recovered : fno2kHz(14);
+			return;
+		}
+		*f =	*f >= 1049480 ? *f		:	/* min real kHz	*/
+			*f > 50 ? fno2kHz(4)		:	/* BS11 etc.	*/
+			fno2kHz(*f - 1);			// BS:1-25 CS:26-50
+	}
+
+	u32 fno2Hz(u32 fno)
+	{
+		return	(fno > 112 ? 557 : 93 + 6 * fno + (fno < 12 ? 0 : fno < 17 ? 2 : fno < 63 ? 0 : 2)) * 1000000 + 142857;
+	}
+
+	void t_Hz(u32 *f)
+	{
+		*f =	*f >= 90000000	? *f			:	/* real_freq Hz	*/
+			*f > 255	? fno2Hz(77)		:	/* NHK		*/
+			*f > 127	? fno2Hz(*f - 128)	:	/* freqno (IO#)	*/
+			*f > 63	? (*f -= 64,				/* CATV		*/
+				*f > 22	? fno2Hz(*f - 1)	:	/* C23-C62	*/
+				*f > 12	? fno2Hz(*f - 10)	:	/* C13-C22	*/
+				fno2Hz(77))			:
+			*f > 62	? fno2Hz(77)			:
+			*f > 12	? fno2Hz(*f + 50)		:	/* 13-62	*/
+			*f > 3	? fno2Hz(*f +  9)		:	/*  4-12	*/
+			*f	? fno2Hz(*f -  1)		:	/*  1-3		*/
+			fno2Hz(77);
+	}
+
 	struct i2c_client	*c	= fe->demodulator_priv;
 	enum fe_status		*festat	= i2c_get_clientdata(c);
 	u16			set_id	= fe->dtv_property_cache.stream_id,
@@ -223,8 +223,8 @@ static struct dvb_frontend_ops tc90522_ops = {
 		.name = TC90522_MODNAME,
 		.caps = FE_CAN_INVERSION_AUTO | FE_CAN_FEC_AUTO | FE_CAN_QAM_AUTO | FE_CAN_MULTISTREAM |
 			FE_CAN_TRANSMISSION_MODE_AUTO | FE_CAN_GUARD_INTERVAL_AUTO | FE_CAN_HIERARCHY_AUTO,
-		.frequency_min_hz	= 1000,		/* > 0 to suppress "limits undefined" warning	*/
-		.frequency_max_hz	= 0xFFFFFFFF,	/* U32_MAX: accept all u32 values		*/
+		.frequency_min_hz	= 0,		// disabled: libdvbv5 LNB LO underflow handled in s_kHz()
+		.frequency_max_hz	= 0,		// s_kHz/t_Hz in .tune handle normalization
 	},
 	.get_frontend_algo = tc90522_get_frontend_algo,
 	.read_snr	= tc90522_cn_raw,
