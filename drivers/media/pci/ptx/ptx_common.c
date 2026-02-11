@@ -73,6 +73,8 @@ static int ptx_stop_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
 
+	if (--adap->nfeeds)
+		return 0;
 	adap->card->dma(adap, false);
 	if (adap->kthread)
 		kthread_stop(adap->kthread);
@@ -82,12 +84,18 @@ static int ptx_stop_feed(struct dvb_demux_feed *feed)
 static int ptx_start_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
+	int err;
 
+	if (adap->nfeeds++)
+		return 0;
 	if (adap->card->thread)
 		adap->kthread = kthread_run(adap->card->thread, adap, "%s_%d%c", adap->dvb.name, adap->dvb.num,
 					adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS ? 's' :
 					adap->fe->dtv_property_cache.delivery_system == SYS_ISDBT ? 't' : 'u');
-	return IS_ERR(adap->kthread) ? PTR_ERR(adap->kthread) : adap->card->dma(adap, true);
+	err = IS_ERR(adap->kthread) ? PTR_ERR(adap->kthread) : adap->card->dma(adap, true);
+	if (err)
+		adap->nfeeds--;
+	return err;
 }
 
 struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card_priv, u32 sz_adap_priv,
@@ -256,13 +264,13 @@ int ptx_register_adap(struct ptx_card *card, const struct ptx_subdev_info *info,
 			return -ENFILE;
 		}
 		demux->dmx.capabilities = DMX_TS_FILTERING | DMX_SECTION_FILTERING;
-		demux->feednum		= 1;
-		demux->filternum	= 1;
+		demux->feednum		= 256;
+		demux->filternum	= 256;
 		demux->start_feed	= ptx_start_feed;
 		demux->stop_feed	= ptx_stop_feed;
 		if (dvb_dmx_init(demux) < 0)
 			return -ENOMEM;
-		dmxdev->filternum	= 1;
+		dmxdev->filternum	= 256;
 		dmxdev->demux		= &demux->dmx;
 		err			= dvb_dmxdev_init(dmxdev, dvb);
 		if (err)

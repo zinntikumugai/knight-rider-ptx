@@ -50,6 +50,7 @@ struct ptx_card {
 struct ptx_adap {
 	struct ptx_card		*card;
 	bool			ON;
+	int			nfeeds;
 	struct dvb_adapter	dvb;
 	struct dvb_demux	demux;
 	struct dmxdev		dmxdev;
