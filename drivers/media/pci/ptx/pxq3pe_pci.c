@@ -309,6 +309,29 @@ static void pxq3pe_power(struct ptx_card *card, bool ON)
 	}
 }
 
+static void pxq3pe_dma_put_stream(struct pxq3pe_adap *p)
+{
+	u8	*src	= p->tBuf;
+	u32	len	= p->tBufIdx,
+		savesz	= len <= p->sBufSize - p->sBufStop ? len : p->sBufSize - p->sBufStop,
+		remain	= len - savesz;
+
+	memcpy(&p->sBuf[p->sBufStop], src, savesz);
+	if (remain)
+		memcpy(p->sBuf, &src[savesz], remain);
+	p->sBufStop = (p->sBufStop + len) % p->sBufSize;
+	if (p->sBufByteCnt == p->sBufSize)
+		p->sBufStart = p->sBufStop;
+	else {
+		if (p->sBufSize >= p->sBufByteCnt + len)
+			p->sBufByteCnt += len;
+		else {
+			p->sBufStart = p->sBufStop;
+			p->sBufByteCnt = p->sBufSize;
+		}
+	}
+}
+
 static irqreturn_t pxq3pe_irq(int irq, void *ctx)
 {
 	struct ptx_card		*card	= ctx;
@@ -320,29 +343,6 @@ static irqreturn_t pxq3pe_irq(int irq, void *ctx)
 	bool	ch	= irqstat & 0b0101 ? 0 : 1,
 		port	= irqstat & 0b0011 ? 0 : 1;
 	u8	*tbuf	= c->dma.dat + PKT_BUFSZ * (port * 2 + ch);
-
-	void pxq3pe_dma_put_stream(struct pxq3pe_adap *p)
-	{
-		u8	*src	= p->tBuf;
-		u32	len	= p->tBufIdx,
-			savesz	= len <= p->sBufSize - p->sBufStop ? len : p->sBufSize - p->sBufStop,
-			remain	= len - savesz;
-
-		memcpy(&p->sBuf[p->sBufStop], src, savesz);
-		if (remain)
-			memcpy(p->sBuf, &src[savesz], remain);
-		p->sBufStop = (p->sBufStop + len) % p->sBufSize;
-		if (p->sBufByteCnt == p->sBufSize)
-			p->sBufStart = p->sBufStop;
-		else {
-			if (p->sBufSize >= p->sBufByteCnt + len)
-				p->sBufByteCnt += len;
-			else {
-				p->sBufStart = p->sBufStop;
-				p->sBufByteCnt = p->sBufSize;
-			}
-		}
-	}
 
 	if (!(irqstat & 0b1111))
 		return IRQ_HANDLED;

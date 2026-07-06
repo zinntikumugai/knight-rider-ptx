@@ -8,8 +8,9 @@ KDIR := /lib/modules/$(KVER)
 KBUILD := $(KDIR)/build
 SRCS := $(shell find $(PWD)/drivers -name "*.c")
 HDRS := $(shell find $(PWD)/drivers -name "*.h")
-IDIR := $(sort $(dir $(HDRS))) drivers/media/dvb-core drivers/media/dvb-frontends drivers/media/tuners
-ldflags-y += -s
+IDIR := $(sort $(dir $(HDRS))) $(srctree)/drivers/media/dvb-core $(srctree)/drivers/media/dvb-frontends $(srctree)/drivers/media/tuners
+# -s は使用不可: シンボルを消すと kernel 6.13+ の LD 段階 objtool 検証が
+# "unannotated intra-function call" で失敗する（strip は install 時に実施）
 ccflags-y += -O3 -Os -Wformat=2 -Wall -Werror $(addprefix -I, $(IDIR))
 MODS := $(shell . $(PWD)/dkms.conf; echo $${BUILT_MODULE_NAME[*]})
 DIRS := $(addprefix $(KDIR), $(shell . $(PWD)/dkms.conf; echo $${DEST_MODULE_LOCATION[*]}))
@@ -68,16 +69,37 @@ install_compress: install
 	fi
 	depmod -a $(KVER)
 
+# Docker ビルドテスト。TEST_UBUNTU/TEST_KSRC で対象を切替:
+#   make test                                (Ubuntu 24.04 / kernel 6.8)
+#   make test TEST_UBUNTU=26.04 TEST_KSRC=7.0 (Ubuntu 26.04 / kernel 7.0)
+#   make test-all                            (両方)
+# コンテナ内では Ubuntu の linux-headers-*-generic (完全な Module.symvers 付き)
+# に対してビルドし、全モジュールの .ko 生成を成功条件とする。
+TEST_UBUNTU ?= 24.04
+TEST_KSRC ?= 6.8
+
 test:
-	@echo "=== Testing Docker container build ==="
+	@echo "=== Testing Docker container build (Ubuntu $(TEST_UBUNTU) / kernel $(TEST_KSRC)) ==="
 	@echo "Building Docker image with source code..."
-	@docker build -t ptx-build-test . && \
+	@docker build --build-arg UBUNTU=$(TEST_UBUNTU) --build-arg KSRC=$(TEST_KSRC) -t ptx-build-test-$(TEST_KSRC) . && \
 		echo "Docker build: SUCCESS" || \
 		(echo "Docker build: FAILED" && exit 1)
 	@echo ""
 	@echo "Testing build inside container..."
-	@docker run --rm ptx-build-test bash -c "cd /opt/ptx && $(MAKE) KVER=6.8.0 KDIR=/usr/src/linux-6.8 KBUILD=/usr/src/linux-6.8" && \
+	@docker run --rm ptx-build-test-$(TEST_KSRC) bash -c '\
+		cd /opt/ptx && \
+		KB=$$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1) && \
+		KB=$${KB:-/usr/src/linux-$(TEST_KSRC)} && \
+		echo "Building against $$KB" && \
+		make KVER=$${KB##*linux-headers-} KDIR=$$KB KBUILD=$$KB && \
+		for m in $(TGTS); do \
+			[ -f $$m ] && echo "OK: $$m" || { echo "MISSING: $$m"; exit 1; }; \
+		done' && \
 		echo "Container build test: SUCCESS" || \
 		(echo "Container build test: FAILED" && exit 1)
 	@echo ""
 	@echo "=== Docker build test completed successfully ==="
+
+test-all:
+	$(MAKE) test
+	$(MAKE) test TEST_UBUNTU=26.04 TEST_KSRC=7.0

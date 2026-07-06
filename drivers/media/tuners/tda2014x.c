@@ -66,24 +66,24 @@ static bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbit
 	return true;
 }
 
+static u64 tda2014x_div10(u64 n, u8 pow)
+{
+	u64	q, r;
+
+	while (pow--) {
+		q = (n >> 1) + (n >> 2);
+		q = q + (q >> 4);
+		q = q + (q >> 8);
+		q = q + (q >> 16);
+		q = q >> 3;
+		r = n - (((q << 2) + q) << 1);
+		n = q + (r > 9);
+	}
+	return n;
+}
+
 static int tda2014x_tune(struct dvb_frontend *fe)
 {
-	u64 div10(u64 n, u8 pow)
-	{
-		u64	q, r;
-
-		while (pow--) {
-			q = (n >> 1) + (n >> 2);
-			q = q + (q >> 4);
-			q = q + (q >> 8);
-			q = q + (q >> 16);
-			q = q >> 3;
-			r = n - (((q << 2) + q) << 1);
-			n = q + (r > 9);
-		}
-		return n;
-	}
-
 	enum {
 		TDA2014X_LNA_GAIN_7dB	= 0x0,
 		TDA2014X_LNA_GAIN_10dB	= 0x1,
@@ -148,7 +148,7 @@ static int tda2014x_tune(struct dvb_frontend *fe)
 
 	ResLsb = (8 - i) * f_kHz * 1000UL / 27UL;	/* Xtal 27 MHz */
 	kint = ResLsb;
-	v15 = div10(ResLsb, 6);
+	v15 = tda2014x_div10(ResLsb, 6);
 	R = 1;
 	Premain = 1;
 	Nint = (v15 * R) >> Premain;
@@ -195,15 +195,15 @@ LABEL_36:
 	default:
 		return -ERANGE;
 	}
-	kint		= div10(kint, 1) * 10;
+	kint		= tda2014x_div10(kint, 1) * 10;
 	ePllRefClkRatio	= R == 2 ? 1 : R == 3 ? 2 : 0;
 	PredividerRatio	= Premain == 1 ? 0 : 1;
-	DsmIntInReg	= div10(kint, 6);
+	DsmIntInReg	= tda2014x_div10(kint, 6);
 	DsmFracInReg	= kint - 1000000 * DsmIntInReg;
 	for (i = 0; i < 16; i++) {
 		DsmFracInReg *= 2;
 		if (DsmFracInReg > 0xFFFFFFF && i != 15) {
-			DsmFracInReg = div10(DsmFracInReg, 1);
+			DsmFracInReg = tda2014x_div10(DsmFracInReg, 1);
 			CalcPow--;
 		}
 	}
@@ -217,7 +217,7 @@ LABEL_36:
 		/* SetPllDividerConfig */
 		tda2014x_w16(c, 0x1A, 5, 1, 0, 1, 6, PredividerRatio)			&&
 		tda2014x_w16(c, 0x1E, 0, 8, 0, 0, 6, DsmIntInReg - 128)		&&
-		tda2014x_w16(c, 0x1F, 0, 0x10, 2, 0, 6, div10(DsmFracInReg, CalcPow))	&&
+		tda2014x_w16(c, 0x1F, 0, 0x10, 2, 0, 6, tda2014x_div10(DsmFracInReg, CalcPow))	&&
 
 		/* ProgramVcoChannelChange */
 		tda2014x_r8(c, 0x12, 0, 8, &val)				&&

@@ -69,87 +69,95 @@ struct pt3_adap {
 			*desc_info;
 };
 
+static u32 pt3_i2c_wait(struct pt3_card *c)
+{
+	u32 val;
+
+	while (1) {
+		val = readl(c->bar_reg + PT3_REG_I2C_R);
+
+		if (!(val & 1))							/* sequence stopped */
+			return val;
+		msleep_interruptible(0);
+	}
+}
+
 static int pt3_i2c_flush(struct pt3_card *c, u32 start_addr)
 {
 	u32	val	= 0b0110,
 		i	= 999;
 
-	void i2c_wait(void)
-	{
-		while (1) {
-			val = readl(c->bar_reg + PT3_REG_I2C_R);
-
-			if (!(val & 1))						/* sequence stopped */
-				return;
-			msleep_interruptible(0);
-		}
-	}
-
 	while ((val & 0b0110) && i--) {						/* I2C bus is dirty */
-		i2c_wait();
+		val = pt3_i2c_wait(c);
 		writel(1 << 16 | start_addr, c->bar_reg + PT3_REG_I2C_W);	/* 0x00010000 start sequence */
-		i2c_wait();
+		val = pt3_i2c_wait(c);
 	}
 	return val & 0b0110 ? -EIO : 0;						/* ACK status */
 }
 
+enum pt3_i2c_cmd {
+	I_END,
+	I_ADDRESS,
+	I_CLOCK_L,
+	I_CLOCK_H,
+	I_DATA_L,
+	I_DATA_H,
+	I_RESET,
+	I_SLEEP,
+	I_DATA_L_NOP	= 0x08,
+	I_DATA_H_NOP	= 0x0c,
+	I_DATA_H_READ	= 0x0d,
+	I_DATA_H_ACK0	= 0x0e,
+};
+
+struct pt3_i2c_wr {
+	struct pt3_card	*c;
+	u32	offset;
+	u8	buf;
+	bool	filled;
+};
+
+static void pt3_i2c_shoot(struct pt3_i2c_wr *w, u8 dat)
+{
+	if (w->filled) {
+		w->buf |= dat << 4;
+		writeb(w->buf, w->c->bar_mem + PT3_I2C_DATA_OFFSET + w->offset);
+		w->offset++;
+	} else
+		w->buf = dat;
+	w->filled ^= true;
+}
+
+static void pt3_i2c_w(struct pt3_i2c_wr *w, const u8 *dat, u32 size)
+{
+	u32 i, j;
+
+	for (i = 0; i < size; i++) {
+		for (j = 0; j < 8; j++)
+			pt3_i2c_shoot(w, (dat[i] >> (7 - j)) & 1 ? I_DATA_H_NOP : I_DATA_L_NOP);
+		pt3_i2c_shoot(w, I_DATA_H_ACK0);
+	}
+}
+
+static void pt3_i2c_r(struct pt3_i2c_wr *w, u32 size)
+{
+	u32 i, j;
+
+	for (i = 0; i < size; i++) {
+		for (j = 0; j < 8; j++)
+			pt3_i2c_shoot(w, I_DATA_H_READ);
+		if (i == (size - 1))
+			pt3_i2c_shoot(w, I_DATA_H_NOP);
+		else
+			pt3_i2c_shoot(w, I_DATA_L_NOP);
+	}
+}
+
 static int pt3_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 {
-	enum pt3_i2c_cmd {
-		I_END,
-		I_ADDRESS,
-		I_CLOCK_L,
-		I_CLOCK_H,
-		I_DATA_L,
-		I_DATA_H,
-		I_RESET,
-		I_SLEEP,
-		I_DATA_L_NOP	= 0x08,
-		I_DATA_H_NOP	= 0x0c,
-		I_DATA_H_READ	= 0x0d,
-		I_DATA_H_ACK0	= 0x0e,
-	};
 	struct ptx_card *card	= i2c_get_adapdata(i2c);
 	struct pt3_card *c	= card->priv;
-	u32	offset		= 0;
-	u8	buf = 0;
-	bool	filled		= false;
-
-	void i2c_shoot(u8 dat)
-	{
-		if (filled) {
-			buf |= dat << 4;
-			writeb(buf, c->bar_mem + PT3_I2C_DATA_OFFSET + offset);
-			offset++;
-		} else
-			buf = dat;
-		filled ^= true;
-	}
-
-	void i2c_w(const u8 *dat, u32 size)
-	{
-		u32 i, j;
-
-		for (i = 0; i < size; i++) {
-			for (j = 0; j < 8; j++)
-				i2c_shoot((dat[i] >> (7 - j)) & 1 ? I_DATA_H_NOP : I_DATA_L_NOP);
-			i2c_shoot(I_DATA_H_ACK0);
-		}
-	}
-
-	void i2c_r(u32 size)
-	{
-		u32 i, j;
-
-		for (i = 0; i < size; i++) {
-			for (j = 0; j < 8; j++)
-				i2c_shoot(I_DATA_H_READ);
-			if (i == (size - 1))
-				i2c_shoot(I_DATA_H_NOP);
-			else
-				i2c_shoot(I_DATA_L_NOP);
-		}
-	}
+	struct pt3_i2c_wr wr	= {.c = c, .offset = 0, .buf = 0, .filled = false};
 	int i, j;
 
 	if (sz < 1 || sz > 3 || !msg || msg[0].flags)		/* always write first */
@@ -159,24 +167,24 @@ static int pt3_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 		u8 byte = (msg[i].addr << 1) | (msg[i].flags & 1);
 
 		/* start */
-		i2c_shoot(I_DATA_H);
-		i2c_shoot(I_CLOCK_H);
-		i2c_shoot(I_DATA_L);
-		i2c_shoot(I_CLOCK_L);
-		i2c_w(&byte, 1);
+		pt3_i2c_shoot(&wr, I_DATA_H);
+		pt3_i2c_shoot(&wr, I_CLOCK_H);
+		pt3_i2c_shoot(&wr, I_DATA_L);
+		pt3_i2c_shoot(&wr, I_CLOCK_L);
+		pt3_i2c_w(&wr, &byte, 1);
 		if (msg[i].flags == I2C_M_RD)
-			i2c_r(msg[i].len);
+			pt3_i2c_r(&wr, msg[i].len);
 		else
-			i2c_w(msg[i].buf, msg[i].len);
+			pt3_i2c_w(&wr, msg[i].buf, msg[i].len);
 	}
 
 	/* stop */
-	i2c_shoot(I_DATA_L);
-	i2c_shoot(I_CLOCK_H);
-	i2c_shoot(I_DATA_H);
-	i2c_shoot(I_END);
-	if (filled)
-		i2c_shoot(I_END);
+	pt3_i2c_shoot(&wr, I_DATA_L);
+	pt3_i2c_shoot(&wr, I_CLOCK_H);
+	pt3_i2c_shoot(&wr, I_DATA_H);
+	pt3_i2c_shoot(&wr, I_END);
+	if (wr.filled)
+		pt3_i2c_shoot(&wr, I_END);
 	if (pt3_i2c_flush(c, 0))
 		sz = -EIO;
 	else
@@ -307,6 +315,69 @@ static void pt3_remove(struct pci_dev *pdev)
 		iounmap(c->bar_mem);
 }
 
+static bool pt3_dma_create(struct ptx_card *card, struct pt3_adap *p)
+{
+	struct dma_desc {
+		u64 page_addr;
+		u32 page_size;
+		u64 next_desc;
+	} __packed;		/* 20B */
+	enum {
+		DESC_SZ		= sizeof(struct dma_desc),		/* 20B	*/
+		DESC_MAX	= 4096 / DESC_SZ,			/* 204	*/
+		DESC_PAGE_SZ	= DESC_MAX * DESC_SZ,			/* 4080	*/
+		TS_PAGE_CNT	= PTX_TS_SIZE / 4,			/* 47	*/
+		TS_BLOCK_CNT	= 17,
+	};
+	struct pt3_dma	*descinfo;
+	struct dma_desc	*prev		= NULL,
+			*curr		= NULL;
+	u32		i,
+			j,
+			desc_todo	= 0,
+			desc_pg_idx	= 0;
+	u64		desc_addr	= 0;
+
+	p->ts_blk_cnt	= TS_BLOCK_CNT;							/* 17	*/
+	p->desc_pg_cnt	= roundup(TS_PAGE_CNT * p->ts_blk_cnt, DESC_MAX);		/* 4	*/
+	p->ts_info	= kcalloc(p->ts_blk_cnt, sizeof(struct pt3_dma), GFP_KERNEL);
+	p->desc_info	= kcalloc(p->desc_pg_cnt, sizeof(struct pt3_dma), GFP_KERNEL);
+	if (!p->ts_info || !p->desc_info)
+		return false;
+	for (i = 0; i < p->desc_pg_cnt; i++) {						/* 4	*/
+		p->desc_info[i].sz	= DESC_PAGE_SZ;					/* 4080B, max 204 * 4 = 816 descs */
+		p->desc_info[i].dat	= dma_alloc_coherent(&card->pdev->dev, p->desc_info[i].sz, &p->desc_info[i].adr, GFP_KERNEL);
+		if (!p->desc_info[i].dat)
+			return false;
+		memset(p->desc_info[i].dat, 0, p->desc_info[i].sz);
+	}
+	for (i = 0; i < p->ts_blk_cnt; i++) {						/* 17	*/
+		p->ts_info[i].sz	= DESC_PAGE_SZ * TS_PAGE_CNT;			/* 1020 pkts, 4080 * 47 = 191760B, total 3259920B */
+		p->ts_info[i].dat	= dma_alloc_coherent(&card->pdev->dev, p->ts_info[i].sz, &p->ts_info[i].adr, GFP_KERNEL);
+		if (!p->ts_info[i].dat)
+			return false;
+		for (j = 0; j < TS_PAGE_CNT; j++) {					/* 47, total 47 * 17 = 799 pages */
+			if (!desc_todo) {						/* 20	*/
+				descinfo	= p->desc_info + desc_pg_idx;		/* jump to next desc_pg */
+				curr		= (struct dma_desc *)descinfo->dat;
+				desc_addr	= descinfo->adr;
+				desc_todo	= DESC_MAX;				/* 204	*/
+				desc_pg_idx++;
+			}
+			if (prev)
+				prev->next_desc = desc_addr;
+			curr->page_addr = p->ts_info[i].adr + DESC_PAGE_SZ * j;
+			curr->page_size = DESC_PAGE_SZ;
+			curr->next_desc = p->desc_info->adr;				/* circular link */
+			prev		= curr;
+			curr++;
+			desc_addr	+= DESC_SZ;
+			desc_todo--;
+		}
+	}
+	return true;
+}
+
 static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct ptx_adap	*adap;
@@ -319,70 +390,6 @@ static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	};
 	struct ptx_card	*card	= ptx_alloc(pdev, KBUILD_MODNAME, ARRAY_SIZE(pt3_subdev_info),
 					sizeof(struct pt3_card), sizeof(struct pt3_adap), pt3_lnb);
-
-	bool dma_create(struct pt3_adap	*p)
-	{
-		struct dma_desc {
-			u64 page_addr;
-			u32 page_size;
-			u64 next_desc;
-		} __packed;		/* 20B */
-		enum {
-			DESC_SZ		= sizeof(struct dma_desc),		/* 20B	*/
-			DESC_MAX	= 4096 / DESC_SZ,			/* 204	*/
-			DESC_PAGE_SZ	= DESC_MAX * DESC_SZ,			/* 4080	*/
-			TS_PAGE_CNT	= PTX_TS_SIZE / 4,			/* 47	*/
-			TS_BLOCK_CNT	= 17,
-		};
-		struct pt3_dma	*descinfo;
-		struct dma_desc	*prev		= NULL,
-				*curr		= NULL;
-		u32		i,
-				j,
-				desc_todo	= 0,
-				desc_pg_idx	= 0;
-		u64		desc_addr	= 0;
-
-		p->ts_blk_cnt	= TS_BLOCK_CNT;							/* 17	*/
-		p->desc_pg_cnt	= roundup(TS_PAGE_CNT * p->ts_blk_cnt, DESC_MAX);		/* 4	*/
-		p->ts_info	= kcalloc(p->ts_blk_cnt, sizeof(struct pt3_dma), GFP_KERNEL);
-		p->desc_info	= kcalloc(p->desc_pg_cnt, sizeof(struct pt3_dma), GFP_KERNEL);
-		if (!p->ts_info || !p->desc_info)
-			return false;
-		for (i = 0; i < p->desc_pg_cnt; i++) {						/* 4	*/
-			p->desc_info[i].sz	= DESC_PAGE_SZ;					/* 4080B, max 204 * 4 = 816 descs */
-			p->desc_info[i].dat	= dma_alloc_coherent(&card->pdev->dev, p->desc_info[i].sz, &p->desc_info[i].adr, GFP_KERNEL);
-			if (!p->desc_info[i].dat)
-				return false;
-			memset(p->desc_info[i].dat, 0, p->desc_info[i].sz);
-		}
-		for (i = 0; i < p->ts_blk_cnt; i++) {						/* 17	*/
-			p->ts_info[i].sz	= DESC_PAGE_SZ * TS_PAGE_CNT;			/* 1020 pkts, 4080 * 47 = 191760B, total 3259920B */
-			p->ts_info[i].dat	= dma_alloc_coherent(&card->pdev->dev, p->ts_info[i].sz, &p->ts_info[i].adr, GFP_KERNEL);
-			if (!p->ts_info[i].dat)
-				return false;
-			for (j = 0; j < TS_PAGE_CNT; j++) {					/* 47, total 47 * 17 = 799 pages */
-				if (!desc_todo) {						/* 20	*/
-					descinfo	= p->desc_info + desc_pg_idx;		/* jump to next desc_pg */
-					curr		= (struct dma_desc *)descinfo->dat;
-					desc_addr	= descinfo->adr;
-					desc_todo	= DESC_MAX;				/* 204	*/
-					desc_pg_idx++;
-				}
-				if (prev)
-					prev->next_desc = desc_addr;
-				curr->page_addr = p->ts_info[i].adr + DESC_PAGE_SZ * j;
-				curr->page_size = DESC_PAGE_SZ;
-				curr->next_desc = p->desc_info->adr;				/* circular link */
-				prev		= curr;
-				curr++;
-				desc_addr	+= DESC_SZ;
-				desc_todo--;
-			}
-		}
-		return true;
-	}
-
 	u8	i;
 	int	ret	= !card || pci_read_config_byte(pdev, PCI_CLASS_REVISION, &i);
 
@@ -403,7 +410,7 @@ static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		struct pt3_adap	*p	= adap->priv;
 
 		p->dma_base	= c->bar_reg + PT3_DMA_BASE + PT3_DMA_OFFSET * i;
-		if (!dma_create(p))
+		if (!pt3_dma_create(card, p))
 			return ptx_abort(pdev, pt3_remove, -ENOMEM, "Failed dma_create");
 	}
 	adap--;

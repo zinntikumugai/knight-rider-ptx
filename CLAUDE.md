@@ -32,21 +32,24 @@ make clean
 make uninstall  # または ./dkms.uninstall
 ```
 
-## Docker 環境でのビルド（Kernel 6.8.0 対応済み）
+## Docker 環境でのビルド（Kernel 6.8.0 / 7.0 対応済み）
 
-このプロジェクトは Kernel 6.8.0 / Ubuntu 24.04 に対応済みです。Docker を使用してビルド・テストできます：
+このプロジェクトは Kernel 6.8.0（Ubuntu 24.04）と Kernel 7.0（Ubuntu 26.04）の両方に対応済みです。Docker を使用してビルド・テストできます：
 
 ```bash
-# Docker イメージのビルド
+# Docker イメージのビルド（デフォルト: Ubuntu 24.04 / kernel 6.8）
 docker build -t ptx-build .
+
+# Ubuntu 26.04 / kernel 7.0 向けイメージのビルド
+docker build --build-arg UBUNTU=26.04 --build-arg KSRC=7.0 -t ptx-build-7.0 .
 
 # コンテナでビルド環境を起動
 docker run -it --rm ptx-build
 
-# コンテナ内でビルドとテスト
-make clean
-make
-make test
+# ホストからの Docker ビルドテスト
+make test                                  # Ubuntu 24.04 / kernel 6.8
+make test TEST_UBUNTU=26.04 TEST_KSRC=7.0  # Ubuntu 26.04 / kernel 7.0
+make test-all                              # 両方
 ```
 
 ### Kernel 6.8.0 対応修正内容
@@ -57,6 +60,20 @@ make test
 - `strlcpy` → `strscpy` への移行
 - 関数プロトタイプ警告の修正 (`static` 化)
 - pxq3pe_pci.c: I2C 読み込み時のバッファ割り当てサイズ修正（`kzalloc(sz, ...)` → `kzalloc(msg->len, ...)`）とmutex解放処理の修正
+
+### Kernel 7.0（Ubuntu 26.04）対応修正内容
+
+単一コードベースで 6.8 と 7.0 の両方に対応（`LINUX_VERSION_CODE` ガードは不要だった）：
+
+- GCC ネスト関数を file-scope の static 関数へ引き上げ（tc90522.c, pt3_pci.c, pxq3pe_pci.c, tda2014x.c）。
+  kernel 6.13+ の LD 段階 objtool 検証（IBT/ORC）でエラーになるため
+- `ldflags-y += -s` を削除。シンボルを strip すると objtool が
+  "unannotated intra-function call" で失敗する（strip は install 時に実施される）
+- kbuild の相対 `-I` パスを `$(srctree)/` 前置に修正（kernel 6.13 で外部モジュールビルドの
+  作業ディレクトリがモジュールディレクトリに変更されたため）
+- Dockerfile を `--build-arg UBUNTU=<ver> KSRC=<ver>` でパラメータ化
+- CI（GitHub Actions）を 24.04/6.8 と 26.04/7.0 の matrix 構成に変更し、
+  全 7 モジュールの .ko 生成を成功条件化
 
 ## コード品質チェック
 

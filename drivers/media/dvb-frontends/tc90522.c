@@ -60,43 +60,47 @@ static int tc90522_cn_raw(struct dvb_frontend *fe, u16 *raw)	/* for DVBv3 compat
 	return cn;
 }
 
+static s64 tc90522_cn_s(s64 raw)	/* @ .0001 dB */
+{
+	s64	x,
+		y;
+
+	raw -= 3000;
+	if (raw < 0)
+		raw = 0;
+	x = int_sqrt(raw << 20);
+	y = 16346ll * x - (143410ll << 16);
+	y = ((x * y) >> 16) + (502590ll << 16);
+	y = ((x * y) >> 16) - (889770ll << 16);
+	y = ((x * y) >> 16) + (895650ll << 16);
+	y = (588570ll << 16) - ((x * y) >> 16);
+	return y < 0 ? 0 : y >> 16;
+}
+
+static s64 tc90522_cn_t(s64 raw)	/* @ .0001 dB */
+{
+	s64	x,
+		y;
+
+	if (!raw)
+		return 0;
+	x = (1130911733ll - 10ll * intlog10(raw)) >> 2;
+	y = (x >> 2) - (x >> 6) + (x >> 8) + (x >> 9) - (x >> 10) + (x >> 11) + (x >> 12) - (16ll << 22);
+	y = ((x * y) >> 22) + (398ll << 22);
+	y = ((x * y) >> 22) + (5491ll << 22);
+	y = ((x * y) >> 22) + (30965ll << 22);
+	return y >> 22;
+}
+
 static int tc90522_status(struct dvb_frontend *fe, enum fe_status *stat)
 {
 	enum fe_status			*festat	= i2c_get_clientdata(fe->demodulator_priv);
 	struct dtv_frontend_properties	*c	= &fe->dtv_property_cache;
 	u16	v16;
-	s64	raw	= tc90522_cn_raw(fe, &v16),
-		x = 0,
-		y = 0;
-
-	s64 cn_s(void)	/* @ .0001 dB */
-	{
-		raw -= 3000;
-		if (raw < 0)
-			raw = 0;
-		x = int_sqrt(raw << 20);
-		y = 16346ll * x - (143410ll << 16);
-		y = ((x * y) >> 16) + (502590ll << 16);
-		y = ((x * y) >> 16) - (889770ll << 16);
-		y = ((x * y) >> 16) + (895650ll << 16);
-		y = (588570ll << 16) - ((x * y) >> 16);
-		return y < 0 ? 0 : y >> 16;
-	}
-
-	s64 cn_t(void)	/* @ .0001 dB */
-	{
-		if (!raw)
-			return 0;
-		x = (1130911733ll - 10ll * intlog10(raw)) >> 2;
-		y = (x >> 2) - (x >> 6) + (x >> 8) + (x >> 9) - (x >> 10) + (x >> 11) + (x >> 12) - (16ll << 22);
-		y = ((x * y) >> 22) + (398ll << 22);
-		y = ((x * y) >> 22) + (5491ll << 22);
-		y = ((x * y) >> 22) + (30965ll << 22);
-		return y >> 22;
-	}
+	s64	raw	= tc90522_cn_raw(fe, &v16);
 
 	c->cnr.len		= 1;
-	c->cnr.stat[0].svalue	= fe->dtv_property_cache.delivery_system == SYS_ISDBS ? cn_s() : cn_t();
+	c->cnr.stat[0].svalue	= fe->dtv_property_cache.delivery_system == SYS_ISDBS ? tc90522_cn_s(raw) : tc90522_cn_t(raw);
 	c->cnr.stat[0].scale	= FE_SCALE_DECIBEL;
 	*stat = *festat;
 	return *festat;
@@ -107,52 +111,52 @@ static enum dvbfe_algo tc90522_get_frontend_algo(struct dvb_frontend *fe)
 	return DVBFE_ALGO_HW;
 }
 
+static u32 tc90522_fno2kHz(u32 fno)				// BS/CS110 base freq 10678000 kHz
+{
+	if (fno < 12)
+		return 1049480 + 38360 * fno;			/* 00-11 BS	right	odd	*/
+	else if (fno < 23)
+		return 1068660 + 38360 * (fno - 12);		/* 12-22 BS	left	even	*/
+	else if (fno < 35)
+		return 1613000 + 40000 * (fno - 23);		/* 23-34 CS110	right	even	*/
+	return 1553000 + 40000 * (fno - 35);			/* 35-47 CS110	left	odd	*/
+}
+
+static void tc90522_s_kHz(u32 *f)
+{
+	if (*f > 3224000) {				/* libdvbv5 LNB LO underflow or out of range */
+		u32 recovered = *f + 10678000;		/* reverse LO subtraction via u32 wrap	*/
+		*f = (recovered >= 1049480 && recovered <= 3224000) ? recovered : tc90522_fno2kHz(14);
+		return;
+	}
+	*f =	*f >= 1049480 ? *f			:	/* min real kHz	*/
+		*f > 50 ? tc90522_fno2kHz(4)		:	/* BS11 etc.	*/
+		tc90522_fno2kHz(*f - 1);			// BS:1-25 CS:26-50
+}
+
+static u32 tc90522_fno2Hz(u32 fno)
+{
+	return	(fno > 112 ? 557 : 93 + 6 * fno + (fno < 12 ? 0 : fno < 17 ? 2 : fno < 63 ? 0 : 2)) * 1000000 + 142857;
+}
+
+static void tc90522_t_Hz(u32 *f)
+{
+	*f =	*f >= 90000000	? *f				:	/* real_freq Hz	*/
+		*f > 255	? tc90522_fno2Hz(77)		:	/* NHK		*/
+		*f > 127	? tc90522_fno2Hz(*f - 128)	:	/* freqno (IO#)	*/
+		*f > 63	? (*f -= 64,					/* CATV		*/
+			*f > 22	? tc90522_fno2Hz(*f - 1)	:	/* C23-C62	*/
+			*f > 12	? tc90522_fno2Hz(*f - 10)	:	/* C13-C22	*/
+			tc90522_fno2Hz(77))			:
+		*f > 62	? tc90522_fno2Hz(77)			:
+		*f > 12	? tc90522_fno2Hz(*f + 50)		:	/* 13-62	*/
+		*f > 3	? tc90522_fno2Hz(*f +  9)		:	/*  4-12	*/
+		*f	? tc90522_fno2Hz(*f -  1)		:	/*  1-3		*/
+		tc90522_fno2Hz(77);
+}
+
 static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u32 *delay, enum fe_status *stat)
 {
-	u32 fno2kHz(u32 fno)					// BS/CS110 base freq 10678000 kHz
-	{
-		if (fno < 12)
-			return 1049480 + 38360 * fno;		/* 00-11 BS	right	odd	*/
-		else if (fno < 23)
-			return 1068660 + 38360 * (fno - 12);	/* 12-22 BS	left	even	*/
-		else if (fno < 35)
-			return 1613000 + 40000 * (fno - 23);	/* 23-34 CS110	right	even	*/
-		return 1553000 + 40000 * (fno - 35);		/* 35-47 CS110	left	odd	*/
-	}
-
-	void s_kHz(u32 *f)
-	{
-		if (*f > 3224000) {			/* libdvbv5 LNB LO underflow or out of range */
-			u32 recovered = *f + 10678000;	/* reverse LO subtraction via u32 wrap	*/
-			*f = (recovered >= 1049480 && recovered <= 3224000) ? recovered : fno2kHz(14);
-			return;
-		}
-		*f =	*f >= 1049480 ? *f		:	/* min real kHz	*/
-			*f > 50 ? fno2kHz(4)		:	/* BS11 etc.	*/
-			fno2kHz(*f - 1);			// BS:1-25 CS:26-50
-	}
-
-	u32 fno2Hz(u32 fno)
-	{
-		return	(fno > 112 ? 557 : 93 + 6 * fno + (fno < 12 ? 0 : fno < 17 ? 2 : fno < 63 ? 0 : 2)) * 1000000 + 142857;
-	}
-
-	void t_Hz(u32 *f)
-	{
-		*f =	*f >= 90000000	? *f			:	/* real_freq Hz	*/
-			*f > 255	? fno2Hz(77)		:	/* NHK		*/
-			*f > 127	? fno2Hz(*f - 128)	:	/* freqno (IO#)	*/
-			*f > 63	? (*f -= 64,				/* CATV		*/
-				*f > 22	? fno2Hz(*f - 1)	:	/* C23-C62	*/
-				*f > 12	? fno2Hz(*f - 10)	:	/* C13-C22	*/
-				fno2Hz(77))			:
-			*f > 62	? fno2Hz(77)			:
-			*f > 12	? fno2Hz(*f + 50)		:	/* 13-62	*/
-			*f > 3	? fno2Hz(*f +  9)		:	/*  4-12	*/
-			*f	? fno2Hz(*f -  1)		:	/*  1-3		*/
-			fno2Hz(77);
-	}
-
 	struct i2c_client	*c	= fe->demodulator_priv;
 	enum fe_status		*festat	= i2c_get_clientdata(c);
 	u16			set_id	= fe->dtv_property_cache.stream_id,
@@ -163,7 +167,7 @@ static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u3
 		return 0;
 	*festat = 0;
 	if (fe->dtv_property_cache.delivery_system == SYS_ISDBT) {
-		t_Hz(&fe->dtv_property_cache.frequency);
+		tc90522_t_Hz(&fe->dtv_property_cache.frequency);
 		if (fe->ops.tuner_ops.set_params(fe))
 			return -EIO;
 		while (cnt--) {
@@ -185,7 +189,7 @@ static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u3
 			msleep_interruptible(1);
 		}
 	} else {	// SYS_ISDBS
-		s_kHz(&fe->dtv_property_cache.frequency);
+		tc90522_s_kHz(&fe->dtv_property_cache.frequency);
 		if (fe->ops.tuner_ops.set_params(fe))
 			return -EIO;
 		while (cnt--) {
