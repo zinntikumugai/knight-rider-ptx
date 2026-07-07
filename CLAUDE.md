@@ -68,12 +68,16 @@ make test-all                              # 両方
 - GCC ネスト関数を file-scope の static 関数へ引き上げ（tc90522.c, pt3_pci.c, pxq3pe_pci.c, tda2014x.c）。
   kernel 6.13+ の LD 段階 objtool 検証（IBT/ORC）でエラーになるため
 - `ldflags-y += -s` を削除。シンボルを strip すると objtool が
-  "unannotated intra-function call" で失敗する（strip は install 時に実施される）
+  "unannotated intra-function call" で失敗する（サイズ削減は `make install` 時の `strip --strip-debug` で実施）
 - kbuild の相対 `-I` パスを `$(srctree)/` 前置に修正（kernel 6.13 で外部モジュールビルドの
   作業ディレクトリがモジュールディレクトリに変更されたため）
 - Dockerfile を `--build-arg UBUNTU=<ver> KSRC=<ver>` でパラメータ化
 - CI（GitHub Actions）を 24.04/6.8 と 26.04/7.0 の matrix 構成に変更し、
   全 7 モジュールの .ko 生成を成功条件化
+
+注意: kernel 7.0 対応はビルド対象モジュール（DVB 版）のみ。dkms.conf で無効化中の
+chardev 版（drivers/video）と em28xx（PX-BCUD）にはネスト関数等が残っており、
+コメント解除しても kernel 6.13+ ではビルドできない（対応には大規模な書き直しが必要）。
 
 ## コード品質チェック
 
@@ -137,7 +141,7 @@ DVB 版ツール (`apps/dvb/cmds/`):
 `.github/workflows/build-test.yml` で自動ビルドテストが実行されます：
 
 - **トリガー**: push, pull request, 手動実行
-- **テスト内容**: Docker コンテナ内でのカーネルモジュールビルド
-- **成功判定**: オブジェクトファイル（.o）の生成を確認
-
-注: CI 環境では kernel symbols がないため、最終的なモジュールリンクは失敗する場合がありますが、コンパイル段階の成功をもって合格とします。
+- **テスト内容**: `make test` を matrix 実行（Ubuntu 24.04/kernel 6.8 と Ubuntu 26.04/kernel 7.0 の 2 レグ）。
+  コンテナ内では Ubuntu の linux-headers-*-generic（完全な Module.symvers 付き）に対してビルドする
+- **成功判定**: 全 7 モジュール（tc90522, qm1d1c004x, mxl301rf, nm131, tda2014x, pt3, pxq3pe）の .ko 生成。
+  モジュールリストは dkms.conf の BUILT_MODULE_NAME から Makefile が導出する（CI 側に重複リストは持たない）

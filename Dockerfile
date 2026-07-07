@@ -12,8 +12,11 @@ ARG KSRC=6.8
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies and kernel development tools
+# linux-headers-generic: make test / CI はこのヘッダ（完全な Module.symvers 付き）に
+# 対してビルドする。dkms の Recommends 依存にせず明示的にインストールする。
 RUN apt-get update && apt-get install -y \
         build-essential \
+        linux-headers-generic \
         kmod \
         dkms \
         git \

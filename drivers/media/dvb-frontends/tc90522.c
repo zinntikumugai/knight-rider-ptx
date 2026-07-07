@@ -100,7 +100,8 @@ static int tc90522_status(struct dvb_frontend *fe, enum fe_status *stat)
 	s64	raw	= tc90522_cn_raw(fe, &v16);
 
 	c->cnr.len		= 1;
-	c->cnr.stat[0].svalue	= fe->dtv_property_cache.delivery_system == SYS_ISDBS ? tc90522_cn_s(raw) : tc90522_cn_t(raw);
+	c->cnr.stat[0].svalue	= (fe->dtv_property_cache.delivery_system == SYS_ISDBS ?
+					tc90522_cn_s(raw) : tc90522_cn_t(raw)) / 10;	/* .0001 dB -> FE_SCALE_DECIBEL (.001 dB) */
 	c->cnr.stat[0].scale	= FE_SCALE_DECIBEL;
 	*stat = *festat;
 	return *festat;

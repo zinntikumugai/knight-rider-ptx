@@ -25,59 +25,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-    - name: Build Docker image
-      run: |
-        echo "Building Docker image (Ubuntu ${{ matrix.ubuntu }} / kernel ${{ matrix.ksrc }})..."
-        docker build \
-          --build-arg UBUNTU=${{ matrix.ubuntu }} \
-          --build-arg KSRC=${{ matrix.ksrc }} \
-          -t ptx-build-test .
-
-    - name: Run build in container and check output
-      run: |
-        echo "Running build test in container..."
-
-        mkdir -p build-output
-
-        # Ubuntu の linux-headers-*-generic (完全な Module.symvers 付き) に対して
-        # ビルドし、.ko を回収する
-        docker run --rm -v $(pwd)/build-output:/output ptx-build-test bash -c '
-          cd /opt/ptx
-          KB=$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1)
-          KB=${KB:-/usr/src/linux-${{ matrix.ksrc }}}
-          echo "Building against $KB"
-
-          make KVER=${KB##*linux-headers-} KDIR=$KB KBUILD=$KB 2>&1 | tee /output/build.log
-          find . -maxdepth 1 -name "*.ko" -type f > /output/modules.list
-          cp *.ko /output/ 2>/dev/null || true
-        '
-
-    - name: Verify build results
-      run: |
-        echo "=== Build Log (tail) ==="
-        tail -30 build-output/build.log || echo "No build log found"
-
-        echo -e "\n=== Checking for kernel modules ==="
-        EXPECTED_MODULES=("tc90522.ko" "qm1d1c004x.ko" "mxl301rf.ko" "pt3.ko" "nm131.ko" "tda2014x.ko" "pxq3pe.ko")
-        MISSING=0
-
-        for module in "${EXPECTED_MODULES[@]}"; do
-          if [ -f "build-output/$module" ]; then
-            echo "✓ Found: $module"
-          else
-            echo "✗ Missing: $module"
-            ((MISSING++)) || true
-          fi
-        done
-
-        echo -e "\n=== Build Summary ==="
-        echo "Expected modules: ${#EXPECTED_MODULES[@]}"
-        echo "Missing modules: $MISSING"
-
-        if [ $MISSING -eq 0 ]; then
-          echo "✓ Build test PASSED: all modules built"
-          exit 0
-        else
-          echo "✗ Build test FAILED: $MISSING module(s) missing"
-          exit 1
-        fi
+    # モジュールリストや検証ロジックは Makefile の test ターゲットに一元化されている。
+    # 全モジュール（dkms.conf の BUILT_MODULE_NAME 由来）の .ko 生成が成功条件。
+    - name: Build and verify all modules in container
+      run: make test TEST_UBUNTU=${{ matrix.ubuntu }} TEST_KSRC=${{ matrix.ksrc }}

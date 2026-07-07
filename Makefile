@@ -9,8 +9,9 @@ KBUILD := $(KDIR)/build
 SRCS := $(shell find $(PWD)/drivers -name "*.c")
 HDRS := $(shell find $(PWD)/drivers -name "*.h")
 IDIR := $(sort $(dir $(HDRS))) $(srctree)/drivers/media/dvb-core $(srctree)/drivers/media/dvb-frontends $(srctree)/drivers/media/tuners
-# -s は使用不可: シンボルを消すと kernel 6.13+ の LD 段階 objtool 検証が
-# "unannotated intra-function call" で失敗する（strip は install 時に実施）
+# ldflags-y += -s は使用不可: 中間オブジェクトのシンボルを消すと kernel 6.13+ の
+# LD 段階 objtool 検証が "unannotated intra-function call" で失敗する。
+# サイズ削減は install ターゲットの strip --strip-debug (INSTALL_MOD_STRIP 相当) で行う。
 ccflags-y += -O3 -Os -Wformat=2 -Wall -Werror $(addprefix -I, $(IDIR))
 MODS := $(shell . $(PWD)/dkms.conf; echo $${BUILT_MODULE_NAME[*]})
 DIRS := $(addprefix $(KDIR), $(shell . $(PWD)/dkms.conf; echo $${DEST_MODULE_LOCATION[*]}))
@@ -55,6 +56,7 @@ uninstall:
 install: uninstall all
 	install -d $(DIR0)
 	install -m 644 $(TGTS) $(DIR0)
+	cd $(DIR0) && strip --strip-debug $(TGTS)
 	depmod -a $(KVER)
 
 install_compress: install
@@ -89,9 +91,10 @@ test:
 	@docker run --rm ptx-build-test-$(TEST_KSRC) bash -c '\
 		cd /opt/ptx && \
 		KB=$$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1) && \
-		KB=$${KB:-/usr/src/linux-$(TEST_KSRC)} && \
-		echo "Building against $$KB" && \
-		make KVER=$${KB##*linux-headers-} KDIR=$$KB KBUILD=$$KB && \
+		if [ -n "$$KB" ]; then KV=$${KB##*linux-headers-}; \
+		else KB=/usr/src/linux-$(TEST_KSRC); KV=$(TEST_KSRC).0; fi && \
+		echo "Building against $$KB (KVER=$$KV)" && \
+		make KVER=$$KV KDIR=$$KB KBUILD=$$KB && \
 		for m in $(TGTS); do \
 			[ -f $$m ] && echo "OK: $$m" || { echo "MISSING: $$m"; exit 1; }; \
 		done' && \
