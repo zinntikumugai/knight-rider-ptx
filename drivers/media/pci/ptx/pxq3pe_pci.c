@@ -374,9 +374,27 @@ static int pxq3pe_thread(void *dat)
 {
 	struct ptx_adap		*adap	= dat;
 	struct pxq3pe_adap	*p	= adap->priv;
+	struct pxq3pe_card	*c	= adap->card->priv;
+	struct i2c_client	*d	= adap->fe->demodulator_priv;
+	u8		didx	= (d->addr / 2) & (adap->card->adapn - 1);
+	bool		dport	= !(didx & 4);
+	unsigned long	dbg_next = jiffies;
+	int		dbg	= 0;
 
 	set_freezable();
 	while (!kthread_should_stop()) {
+		if (dbg < 15 && time_after_eq(jiffies, dbg_next)) {
+			pr_info("pxq3pe diag adap%d port%d #%02d: IRQ_STAT=%08x ACT=%08x MGMT=%08x XFR0=%08x XFR1=%08x sBuf=%u\n",
+				didx, dport, dbg,
+				readl(c->bar + PXQ3PE_IRQ_STAT),
+				readl(c->bar + PXQ3PE_IRQ_ACTIVE),
+				readl(c->bar + PXQ3PE_DMA_OFFSET_PORT * dport + PXQ3PE_DMA_MGMT),
+				readl(c->bar + PXQ3PE_DMA_OFFSET_PORT * dport + PXQ3PE_DMA_XFR_STAT),
+				readl(c->bar + PXQ3PE_DMA_OFFSET_PORT * dport + PXQ3PE_DMA_OFFSET_CH + PXQ3PE_DMA_XFR_STAT),
+				p->sBufByteCnt);
+			dbg++;
+			dbg_next = jiffies + HZ;
+		}
 		u8	*rbuf	= &p->sBuf[p->sBufStart];
 		int	i	= 0,
 			j	= 0,
@@ -455,6 +473,11 @@ static int pxq3pe_dma(struct ptx_adap *adap, bool ON)
 					c->bar + PXQ3PE_DMA_OFFSET_PORT * port + PXQ3PE_DMA_MGMT);
 	}
 	c->dma.ON[port] = true;
+	pr_info("pxq3pe diag: DMA armed adap%d port%d TSMODE=%02x MGMT=%08x IRQ_EN readback ACT=%08x adr=%pad\n",
+		idx, port,
+		readb(c->bar + PXQ3PE_DMA_OFFSET_PORT * port + PXQ3PE_DMA_TSMODE),
+		readl(c->bar + PXQ3PE_DMA_OFFSET_PORT * port + PXQ3PE_DMA_MGMT),
+		readl(c->bar + PXQ3PE_IRQ_ACTIVE), &c->dma.adr);
 	return 0;
 }
 
