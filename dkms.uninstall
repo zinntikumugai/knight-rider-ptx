@@ -1,8 +1,11 @@
 . dkms.conf
 
+# 未登録時に dkms remove が "Error! ... not located in the DKMS tree" を
+# 出すのを避けるため、登録済みの場合のみ remove する
+# (dkms 2.x: "ptx, 0.0.1, ..." / dkms 3.x: "ptx/0.0.1, ..." の両書式に対応)
 su -c "
-#dkms uninstall -m $PACKAGE_NAME -v $PACKAGE_VERSION;
-#dkms remove -m $PACKAGE_NAME -v $PACKAGE_VERSION -k `uname -r`;
-dkms remove -m $PACKAGE_NAME -v $PACKAGE_VERSION --all;
+if dkms status | grep -q '^$PACKAGE_NAME[/,]'; then
+	dkms remove -m $PACKAGE_NAME -v $PACKAGE_VERSION --all;
+fi;
 make uninstall;
 rm -vrf /usr/src/$PACKAGE_NAME-$PACKAGE_VERSION"
