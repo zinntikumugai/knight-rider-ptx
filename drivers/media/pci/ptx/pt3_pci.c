@@ -413,13 +413,20 @@ static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (!pt3_dma_create(card, p))
 			return ptx_abort(pdev, pt3_remove, -ENOMEM, "Failed dma_create");
 	}
-	adap--;
 	ret =	ptx_i2c_add_adapter(card, &pt3_i2c_algo)				||
 		pt3_i2c_flush(c, 0)							||
-		ptx_register_adap(card, pt3_subdev_info, pt3_thread, pt3_dma_run)	||
-		pt3_power(adap->fe, PT3_PWR_TUNER_ON)					||
-		pt3_i2c_flush(c, PT3_I2C_START_ADDR)					||
-		pt3_power(adap->fe, PT3_PWR_TUNER_ON | PT3_PWR_AMP_ON);
+		ptx_register_adap(card, pt3_subdev_info, pt3_thread, pt3_dma_run);
+	if (!ret) {
+		/* pt3_power needs a live demod; the last adapter may have been
+		 * skipped (tuner probe failed), so pick the last one with a valid fe.
+		 */
+		for (adap = card->adap + card->adapn - 1; adap >= card->adap && !adap->fe; adap--)
+			;
+		ret =	adap < card->adap ? -ENODEV				:
+			pt3_power(adap->fe, PT3_PWR_TUNER_ON)			||
+			pt3_i2c_flush(c, PT3_I2C_START_ADDR)			||
+			pt3_power(adap->fe, PT3_PWR_TUNER_ON | PT3_PWR_AMP_ON);
+	}
 	return	ret ?
 		ptx_abort(pdev, pt3_remove, ret, "Unable to register I2C/DVB adapter/frontend") :
 		0;

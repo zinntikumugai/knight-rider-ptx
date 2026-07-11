@@ -474,7 +474,9 @@ static void pxq3pe_remove(struct pci_dev *pdev)
 	if (!card)
 		return;
 	c	= card->priv;
-	for (i = 0, adap = card->adap; adap->fe && i < card->adapn; i++, adap++) {
+	for (i = 0, adap = card->adap; i < card->adapn; i++, adap++) {
+		if (!adap->fe)		/* frontend probe was skipped: pxq3pe_dma()/ptx_sleep() deref adap->fe */
+			continue;
 		pxq3pe_dma(adap, false);
 		ptx_sleep(adap->fe);
 	}

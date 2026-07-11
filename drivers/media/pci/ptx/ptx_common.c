@@ -23,8 +23,8 @@ static void ptx_lnb_auto(struct ptx_card *card)
 	struct ptx_adap	*adap;
 	int	i;
 
-	for (i = 0, adap = card->adap; adap->fe && i < card->adapn; i++, adap++)
-		if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS && adap->ON)
+	for (i = 0, adap = card->adap; i < card->adapn; i++, adap++)
+		if (adap->fe && adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS && adap->ON)
 			return;
 	ptx_lnb(card, SEC_VOLTAGE_OFF);
 }
@@ -73,6 +73,8 @@ static int ptx_stop_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
 
+	if (!adap->fe)		/* skipped adapter (frontend probe failed): no feed was started */
+		return 0;
 	if (--adap->nfeeds)
 		return 0;
 	adap->card->dma(adap, false);
@@ -86,6 +88,8 @@ static int ptx_start_feed(struct dvb_demux_feed *feed)
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
 	int err;
 
+	if (!adap->fe)		/* skipped adapter has no frontend/tuner: refuse (avoids adap->fe deref below) */
+		return -ENODEV;
 	if (adap->nfeeds++)
 		return 0;
 	if (adap->card->thread)
@@ -173,6 +177,16 @@ static void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe
 	if (c->dev.driver && try_module_get(c->dev.driver->owner))
 		return;
 	pr_err("%s ERROR Please insmod %s.ko first", __func__, info.type);
+	/* A failed subdev probe may have set fe->{tuner,demodulator}_priv = c
+	 * before erroring out (e.g. tda2014x_probe sets tuner_priv before its
+	 * I2C init). i2c_unregister_device(c) below frees c, so clear any such
+	 * dangling reference — otherwise ptx_register_fe()'s !priv check passes
+	 * and a broken frontend gets registered, crashing on the first tune.
+	 */
+	if (fe->tuner_priv == c)
+		fe->tuner_priv = NULL;
+	if (fe->demodulator_priv == c)
+		fe->demodulator_priv = NULL;
 	ptx_unregister_subdev(c);
 }
 
@@ -276,8 +290,15 @@ int ptx_register_adap(struct ptx_card *card, const struct ptx_subdev_info *info,
 		if (err)
 			return err;
 		adap->fe		= ptx_register_fe(&adap->card->i2c, &adap->dvb, &info[i]);
-		if (!adap->fe)
-			return -ENOMEM;
+		if (!adap->fe) {
+			/* demod/tuner probe failed (e.g. tuner not responding): skip
+			 * this adapter but keep the others usable. The dvb/demux/dmxdev
+			 * registered above stay registered and are freed in
+			 * ptx_unregister_adap(); teardown loops skip NULL-fe adapters.
+			 */
+			pr_err("%s %s adapter %d: frontend probe failed, skipping", __func__, card->name, num);
+			continue;
+		}
 		adap->fe_sleep		= adap->fe->ops.sleep;
 		adap->fe_wakeup		= adap->fe->ops.init;
 		adap->fe->ops.sleep	= ptx_sleep;
