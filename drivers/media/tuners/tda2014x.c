@@ -77,10 +77,13 @@ static bool tda2014x_wait_lock(struct i2c_client *c, u16 slvadr, u8 start_bit)
 	int	i;
 
 	for (i = 0; i < 50; i++) {
-		if (tda2014x_r8(c, slvadr, start_bit, 1, &val) && val)
+		if (tda2014x_r8(c, slvadr, start_bit, 1, &val) && val) {
+			pr_info("tda2014x DIAG %s: lock reg 0x%02x OK after %dms\n", dev_name(&c->dev), slvadr, i);
 			return true;
+		}
 		msleep(1);
 	}
+	pr_info("tda2014x DIAG %s: lock reg 0x%02x TIMEOUT (reached PLL wait)\n", dev_name(&c->dev), slvadr);
 	return false;
 }
 
@@ -274,10 +277,14 @@ static int tda2014x_probe(struct i2c_client *c)
 	u8			val	= 0;
 	struct dvb_frontend	*fe	= c->dev.platform_data;
 
+	int	ret;
+
 	fe->tuner_priv			= c;
 	fe->ops.tuner_ops.set_params	= tda2014x_tune;
 	fe->dtv_property_cache.frequency = 1318000;
-	return	!(tda2014x_w8(c, 0x13, 0)	&&
+	pr_info("tda2014x DIAG %s: first-write ACK=%d\n", dev_name(&c->dev),
+		tda2014x_w8(c, 0x13, 0));	/* does the tuner gateway ACK at all? */
+	ret =	!(tda2014x_w8(c, 0x13, 0)	&&
 		tda2014x_w8(c, 0x15, 0)	&&
 		tda2014x_w8(c, 0x17, 0)	&&
 		tda2014x_w8(c, 0x1C, 0)	&&
@@ -359,6 +366,8 @@ static int tda2014x_probe(struct i2c_client *c)
 		tda2014x_w16(c, 6, 0, 8, 0, 0, 6, (val & 0xF7) | 8)) ? -EIO	:
 
 		tda2014x_tune(fe);
+	pr_info("tda2014x DIAG %s: probe ret=%d\n", dev_name(&c->dev), ret);
+	return ret;
 }
 
 static struct i2c_device_id tda2014x_id[] = {
