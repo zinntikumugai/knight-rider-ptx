@@ -91,7 +91,7 @@ static int qm1d1c004x_set_agc(struct dvb_frontend *fe, enum qm1d1c004x_agc agc)
 static int qm1d1c004x_sleep(struct dvb_frontend *fe)
 {
 	u8	buf	= 1,
-		*reg	= ((struct qm1d1c004x *)fe->tuner_priv)->reg;
+		*reg	= ((struct qm1d1c004x *)i2c_get_clientdata(fe->tuner_priv))->reg;
 
 	reg[0x01] &= (~(1 << 3)) & 0xff;
 	reg[0x01] |= 1 << 0;
@@ -145,7 +145,7 @@ static int qm1d1c004x_tune(struct dvb_frontend *fe)
 		{1600000, 1, 4},	{1450000, 1, 3},	{1250000, 1, 2},
 		{1200000, 0, 7},	{ 975000, 0, 6},	{ 950000, 0, 0}
 	};
-	u8	*reg	= ((struct qm1d1c004x *)fe->tuner_priv)->reg;
+	u8	*reg	= ((struct qm1d1c004x *)i2c_get_clientdata(fe->tuner_priv))->reg;
 	u32	f_kHz	= fe->dtv_property_cache.frequency - 500,
 		XtalkHz	= 16000,
 		i	= ((f_kHz + XtalkHz / 2) / XtalkHz) * XtalkHz;
@@ -215,6 +215,8 @@ static int qm1d1c004x_probe(struct i2c_client *t)
 	struct qm1d1c004x	*q	= kzalloc(sizeof(struct qm1d1c004x), GFP_KERNEL);
 	u8			d[]	= {0x10, 0x15, 0x04};
 
+	int			err;
+
 	if (!q)
 		return -ENOMEM;
 	i2c_set_clientdata(t, q);
@@ -222,9 +224,14 @@ static int qm1d1c004x_probe(struct i2c_client *t)
 	fe->ops.tuner_ops.set_params	= qm1d1c004x_tune;
 	fe->ops.tuner_ops.sleep		= qm1d1c004x_sleep;
 	fe->ops.tuner_ops.init		= qm1d1c004x_wakeup;
-	return	qm1d1c004x_w(fe, 0x1e, d,   1)	||
+	err =	qm1d1c004x_w(fe, 0x1e, d,   1)	||
 		qm1d1c004x_w(fe, 0x1c, d+1, 1)	||
 		qm1d1c004x_w(fe, 0x1f, d+2, 1);
+	if (err) {			/* probe error => .remove is not called; free here */
+		i2c_set_clientdata(t, NULL);
+		kfree(q);
+	}
+	return err;
 }
 
 static struct i2c_device_id qm1d1c004x_id[] = {

@@ -257,7 +257,10 @@ static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 			ret = pxq3pe_w(card, slvadr, regadr, msg->buf, msg->len, mode);
 		mutex_unlock(&card->lock);
 	}
-	return i;
+	/* i was already incremented past the failing message; don't count it as
+	 * transferred, else a single-message write NAK reads back as success (==1).
+	 */
+	return ret ? i : i - 1;
 }
 
 static bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
@@ -302,6 +305,7 @@ static void pxq3pe_power(struct ptx_card *card, bool ON)
 		pxq3pe_w_gpio2(card, 4, 4);
 		pxq3pe_w_gpio2(card, 0, 4);
 		pxq3pe_w_gpio2(card, 4, 4);
+		msleep(20);	/* let tuner xtal/PLL settle before probe hammers I2C + reads lock bits */
 	} else {
 		pxq3pe_w_gpio0(card, 0, 1);
 		pxq3pe_w_gpio0(card, 1, 1);
@@ -352,10 +356,14 @@ static irqreturn_t pxq3pe_irq(int irq, void *ctx)
 		for (i = 0; i < PKT_BUFSZ; i += PTX_TS_SIZE) {
 			u8 idx = !port * 4 + (tbuf[i] == 0xC7 ? 0 : tbuf[i] == 0x47 ?
 					1 : tbuf[i] == 0x07 ? 2 : tbuf[i] == 0x87 ? 3 : card->adapn);
-			struct ptx_adap		*adap	= &card->adap[idx];
-			struct pxq3pe_adap	*p	= adap->priv;
+			struct ptx_adap		*adap;
+			struct pxq3pe_adap	*p;
 
-			if (idx < card->adapn && adap->ON) {
+			if (idx >= card->adapn)		/* unknown TS header: deref only after this guard */
+				continue;
+			adap	= &card->adap[idx];
+			p	= adap->priv;
+			if (adap->ON) {
 				tbuf[i] = PTX_TS_SYNC;
 				memcpy(&p->tBuf[p->tBufIdx], &tbuf[i], PTX_TS_SIZE);
 				p->tBufIdx += PTX_TS_SIZE;
@@ -519,7 +527,7 @@ static int pxq3pe_probe(struct pci_dev *pdev, const struct pci_device_id *pci_id
 	};
 	struct ptx_card		*card	= ptx_alloc(pdev, KBUILD_MODNAME, ARRAY_SIZE(pxq3pe_subdev_info),
 						sizeof(struct pxq3pe_card), sizeof(struct pxq3pe_adap), pxq3pe_lnb);
-	struct pxq3pe_card	*c	= card->priv;
+	struct pxq3pe_card	*c;
 	u8	regctl	= 0xA0,
 		i;
 	u16	cfg;
@@ -527,6 +535,7 @@ static int pxq3pe_probe(struct pci_dev *pdev, const struct pci_device_id *pci_id
 
 	if (err)
 		return ptx_abort(pdev, pxq3pe_remove, err, "Memory/PCI error, card=%p", card);
+	c	= card->priv;	/* deref only after the !card check above */
 	if (!(cfg & PCI_COMMAND_MASTER)) {
 		pci_set_master(pdev);
 		pci_read_config_word(pdev, PCI_COMMAND, &cfg);

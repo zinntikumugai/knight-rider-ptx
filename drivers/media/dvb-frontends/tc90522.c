@@ -14,6 +14,7 @@
  */
 
 #include <linux/int_log.h>
+#include <linux/slab.h>
 #include <media/dvb_frontend.h>
 #include "tc90522.h"
 
@@ -196,8 +197,8 @@ static int tc90522_tune(struct dvb_frontend *fe, bool retune, u32 mode_flags, u3
 		while (cnt--) {
 			u8	i;
 
-			if	((tc90522_r(c, 0xC3, data, 1), !(data[0] & 0x10))	&&	/* locked	*/
-				(tc90522_r(c, 0xCE, data, 2), *(u16 *)data != 0)	&&	/* valid TSID	*/
+			if	(tc90522_r(c, 0xC3, data, 1) && !(data[0] & 0x10)	&&	/* locked	*/
+				tc90522_r(c, 0xCE, data, 2) && *(u16 *)data != 0	&&	/* valid TSID	*/
 				tc90522_r(c, 0xC3, data, 1)				&&
 				tc90522_r(c, 0xCE, data, 16))
 				for (i = 0; i < 8; i++) {
@@ -240,12 +241,22 @@ static struct dvb_frontend_ops tc90522_ops = {
 static int tc90522_probe(struct i2c_client *c)
 {
 	struct dvb_frontend	*fe	= c->dev.platform_data;
-	static enum fe_status	festat	= 0;
+	/* per-instance lock status: a single static was shared by all demods
+	 * (8 on PX-Q3PE) and clobbered across concurrent tunes.
+	 */
+	enum fe_status		*festat	= kzalloc(sizeof(*festat), GFP_KERNEL);
 
+	if (!festat)
+		return -ENOMEM;
 	memcpy(&fe->ops, &tc90522_ops, sizeof(struct dvb_frontend_ops));
 	fe->demodulator_priv = c;
-	i2c_set_clientdata(c, &festat);
+	i2c_set_clientdata(c, festat);
 	return 0;
+}
+
+static void tc90522_remove(struct i2c_client *c)
+{
+	kfree(i2c_get_clientdata(c));
 }
 
 static struct i2c_device_id tc90522_id[] = {
@@ -257,6 +268,7 @@ MODULE_DEVICE_TABLE(i2c, tc90522_id);
 static struct i2c_driver tc90522_driver = {
 	.driver.name	= tc90522_id->name,
 	.probe		= tc90522_probe,
+	.remove		= tc90522_remove,
 	.id_table	= tc90522_id,
 };
 module_i2c_driver(tc90522_driver);

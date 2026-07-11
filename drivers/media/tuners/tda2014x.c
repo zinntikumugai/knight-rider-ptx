@@ -4,6 +4,7 @@
 	Copyright (C) Budi Rachmanto, AreMa Inc. <info@are.ma>
 */
 
+#include <linux/delay.h>
 #include <media/dvb_frontend.h>
 #include "tda2014x.h"
 
@@ -22,8 +23,8 @@ static int tda2014x_r(struct i2c_client *c, u8 slvadr)
 
 static bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *rdat)
 {
-	u8	mask	= nbits > 7 ? 0xFF : ((1 << nbits) - 1) << start_bit,
-		val	= tda2014x_r(c, slvadr);
+	u8	mask	= nbits > 7 ? 0xFF : ((1 << nbits) - 1) << start_bit;
+	int	val	= tda2014x_r(c, slvadr);	/* int: tda2014x_r() may return -EREMOTEIO */
 
 	if (val < 0)
 		return false;
@@ -48,8 +49,8 @@ static bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbit
 		i;
 
 	for (i = 0, nbytes = !nbytes ? 1 : nbytes > 2 ? 2 : nbytes; access & 2 && nbytes; i++, nbytes--) {
-		u8	buf[]	= {0xFE, 0xA8, slvadr + i, 0},
-			ret	= tda2014x_r(c, slvadr + i);
+		u8	buf[]	= {0xFE, 0xA8, slvadr + i, 0};
+		int	ret	= tda2014x_r(c, slvadr + i);	/* int: may return -EREMOTEIO */
 		struct i2c_msg msg[] = {
 			{.addr = c->addr,	.flags = 0,	.buf = buf,	.len = 4,},
 		};
@@ -64,6 +65,23 @@ static bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbit
 			return false;
 	}
 	return true;
+}
+
+/* Poll a tuner PLL/VCO lock bit with a real settling budget (~50ms). The
+ * original code read the lock bit 2-3 times back-to-back with no delay, which
+ * races the analog PLL on faster kernels/buses (intermittent probe -EIO).
+ */
+static bool tda2014x_wait_lock(struct i2c_client *c, u16 slvadr, u8 start_bit)
+{
+	u8	val;
+	int	i;
+
+	for (i = 0; i < 50; i++) {
+		if (tda2014x_r8(c, slvadr, start_bit, 1, &val) && val)
+			return true;
+		msleep(1);
+	}
+	return false;
 }
 
 static u64 tda2014x_div10(u64 n, u8 pow)
@@ -228,8 +246,7 @@ LABEL_36:
 		tda2014x_w16(c, 0x13, 5, 1, 0, 1, 6, 1)			&&
 		tda2014x_w16(c, 0x13, 7, 1, 0, 1, 6, 0)			&&
 		tda2014x_w16(c, 0x13, 4, 1, 0, 1, 6, 1)			&&
-		((tda2014x_r8(c, 0x15, 4, 1, &val) && val == 1)		||
-		(tda2014x_r8(c, 0x15, 4, 1, &val) && val == 1))		&&
+		tda2014x_wait_lock(c, 0x15, 4)				&&	/* VCO cal lock (was 2x no-delay reads) */
 		tda2014x_w16(c, 0x13, 4, 1, 0, 1, 6, 0)			&&
 		tda2014x_r8(c, 0x12, 0, 8, &val)				&&
 		tda2014x_w16(c, 0x12, 0, 8, 0, 0, 6, val & 0x7F)		&&
@@ -328,10 +345,7 @@ static int tda2014x_probe(struct i2c_client *c)
 		tda2014x_w16(c, 0x10, 5, 1, 0, 1, 6, 1)			&&
 		tda2014x_w16(c, 0x10, 5, 1, 0, 1, 6, 1)			&&
 		tda2014x_w16(c, 0xF, 5, 1, 0, 1, 6, 1)				&&
-		tda2014x_r8(c, 0x11, 4, 1, &val)				&&
-		(val || tda2014x_r8(c, 0x11, 4, 1, &val))			&&
-		(val || tda2014x_r8(c, 0x11, 4, 1, &val))			&&
-		val								&&
+		tda2014x_wait_lock(c, 0x11, 4)					&&	/* PLL/VCO POR lock (was 3x no-delay reads) */
 		tda2014x_r8(c, 0x10, 0, 4, &val)				&&
 		tda2014x_w16(c, 0xF, 0, 4, 0, 1, 6, val)			&&
 		tda2014x_w16(c, 0xF, 6, 1, 0, 1, 6, 1)				&&

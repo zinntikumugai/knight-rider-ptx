@@ -235,14 +235,11 @@ static int pt3_dma_run(struct ptx_adap *adap, bool ON)
 		writel(2, base + PT3_DMA_CTL);			/* stop DMA */
 		writeq(p->desc_info->adr, base + PT3_DMA_DESC);
 		writel(1, base + PT3_DMA_CTL);			/* start DMA */
-	} else {
-		writel(2, base + PT3_DMA_CTL);			/* stop DMA */
-		while (i--) {
-			if (!(readl(base + PT3_STATUS) & 1))
-				break;
-			msleep_interruptible(0);
-		}
+		return 0;
 	}
+	writel(2, base + PT3_DMA_CTL);				/* stop DMA */
+	for (i = 999; i && (readl(base + PT3_STATUS) & 1); i--)	/* i==0 => genuine timeout */
+		msleep_interruptible(0);
 	return i ? 0 : -ETIMEDOUT;
 }
 
