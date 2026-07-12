@@ -152,7 +152,15 @@ static bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 b
 		if (readl(bar + PXQ3PE_I2C_CTL_STAT) & 0x400000)
 			break;
 	}
-	return j < 1000 ? !(readl(bar + PXQ3PE_I2C_CTL_STAT) & 0x280000) : false;
+	{
+		u32	st	= readl(bar + PXQ3PE_I2C_CTL_STAT);
+		bool	ok	= j < 1000 && !(st & 0x280000);
+
+		if (!ok)
+			pr_info("pxq3pe_w DIAG slvadr=0x%02x mode=%d j=%d stat=0x%06x %s\n",
+				slvadr, mode, j, st, j >= 1000 ? "TIMEOUT(not-complete)" : "NAK/err");
+		return ok;
+	}
 }
 
 static bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen, u8 mode)
@@ -242,20 +250,30 @@ static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 				: slvadr & 0x80			? PXQ3PE_MOD_STAT
 				: PXQ3PE_MOD_TUNER;
 
-		mutex_lock(&card->lock);
-		if (msg->flags & I2C_M_RD) {
-			u8 *buf	= kzalloc(msg->len, GFP_KERNEL);
+		int try;
 
-			if (!buf) {
-				mutex_unlock(&card->lock);
-				return -ENOMEM;
-			}
-			ret	= pxq3pe_r(card, slvadr, regadr, buf, msg->len, mode);
-			memcpy(msg->buf, buf, msg->len);
-			kfree(buf);
-		} else
-			ret = pxq3pe_w(card, slvadr, regadr, msg->buf, msg->len, mode);
-		mutex_unlock(&card->lock);
+		for (try = 0; try < 8; try++) {		/* DIAG: does an intermittent gateway I2C self-heal on retry? */
+			mutex_lock(&card->lock);
+			if (msg->flags & I2C_M_RD) {
+				u8 *buf	= kzalloc(msg->len, GFP_KERNEL);
+
+				if (!buf) {
+					mutex_unlock(&card->lock);
+					return -ENOMEM;
+				}
+				ret	= pxq3pe_r(card, slvadr, regadr, buf, msg->len, mode);
+				memcpy(msg->buf, buf, msg->len);
+				kfree(buf);
+			} else
+				ret = pxq3pe_w(card, slvadr, regadr, msg->buf, msg->len, mode);
+			mutex_unlock(&card->lock);
+			if (ret)
+				break;
+			usleep_range(2000, 3000);
+		}
+		if (try)
+			pr_info("pxq3pe_i2c_xfr DIAG slvadr=0x%02x mode=%d %s after %d retr%s\n",
+				slvadr, mode, ret ? "OK" : "FAIL", try, try == 1 ? "y" : "ies");
 	}
 	/* i was already incremented past the failing message; don't count it as
 	 * transferred, else a single-message write NAK reads back as success (==1).
