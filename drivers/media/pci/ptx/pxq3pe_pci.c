@@ -129,9 +129,13 @@ static bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 b
 	}
 	writel((slvadr << 8) + regadr, bar + PXQ3PE_I2C_ADR);
 	for (i = 0; i < 16 && i < bytelen; i += 4) {
-		msleep(0);
+		udelay(50);	/* was msleep(0): on kernel >=6.12 a scheduler yield mid-transaction
+				 * makes the slow tuner-gateway I2C (MOD_TUNER, via the demod repeater)
+				 * never complete; a busy-wait keeps the FIFO->START timing deterministic */
 		writel(*((u32 *)(wdat + i)), bar + PXQ3PE_I2C_FIFO_DATA);
 	}
+	readl(bar + PXQ3PE_I2C_FIFO_STAT);	/* flush posted FIFO writes before issuing START */
+	udelay(50);
 	writew((bytelen << 8) + i2cCtlByte, bar + PXQ3PE_I2C_CTL_STAT);
 	for (j = 0; j != 1000; j++) {
 		if (i < bytelen) {
