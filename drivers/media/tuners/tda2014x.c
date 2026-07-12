@@ -277,6 +277,8 @@ static int tda2014x_probe(struct i2c_client *c)
 	fe->tuner_priv			= c;
 	fe->ops.tuner_ops.set_params	= tda2014x_tune;
 	fe->dtv_property_cache.frequency = 1318000;
+	pr_info("tda2014x DIAG %s: first-write ACK=%d\n", dev_name(&c->dev),
+		tda2014x_w8(c, 0x13, 0));	/* does the tuner gateway I2C complete now? */
 	return	!(tda2014x_w8(c, 0x13, 0)	&&
 		tda2014x_w8(c, 0x15, 0)	&&
 		tda2014x_w8(c, 0x17, 0)	&&
