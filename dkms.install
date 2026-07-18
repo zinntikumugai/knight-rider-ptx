@@ -1,8 +1,10 @@
 . dkms.uninstall
 
+# make clean はヘッダ未導入環境でも失敗し得るが致命的でないため ; 継続。
+# コピー以降の本体は && 連結とし、失敗したら以降を実行しない
 su -c "
 make clean;
-cp -a `pwd` /usr/src/$PACKAGE_NAME-$PACKAGE_VERSION;
-dkms add -m $PACKAGE_NAME -v $PACKAGE_VERSION;
-dkms build -m $PACKAGE_NAME -v $PACKAGE_VERSION;
+cp -a `pwd` /usr/src/$PACKAGE_NAME-$PACKAGE_VERSION &&
+dkms add -m $PACKAGE_NAME -v $PACKAGE_VERSION &&
+dkms build -m $PACKAGE_NAME -v $PACKAGE_VERSION &&
 dkms install -m $PACKAGE_NAME -v $PACKAGE_VERSION"

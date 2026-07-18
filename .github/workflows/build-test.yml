@@ -1,0 +1,31 @@
+name: Build Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ubuntu: "24.04"
+            ksrc: "6.8"
+          - ubuntu: "26.04"
+            ksrc: "7.0"
+    name: "Ubuntu ${{ matrix.ubuntu }} / kernel ${{ matrix.ksrc }}"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+    # モジュールリストや検証ロジックは Makefile の test ターゲットに一元化されている。
+    # 全モジュール（dkms.conf の BUILT_MODULE_NAME 由来）の .ko 生成が成功条件。
+    - name: Build and verify all modules in container
+      run: make test TEST_UBUNTU=${{ matrix.ubuntu }} TEST_KSRC=${{ matrix.ksrc }}

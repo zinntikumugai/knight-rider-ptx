@@ -12,7 +12,7 @@
 #include <media/dvb_frontend.h>
 #include "mxl301rf.h"
 
-int mxl301rf_w(struct dvb_frontend *fe, u8 slvadr, const u8 *dat, int len)
+static int mxl301rf_w(struct dvb_frontend *fe, u8 slvadr, const u8 *dat, int len)
 {
 	struct i2c_client	*d	= fe->demodulator_priv;
 	u8			*buf	= kzalloc(len + 1, GFP_KERNEL);
@@ -30,7 +30,7 @@ int mxl301rf_w(struct dvb_frontend *fe, u8 slvadr, const u8 *dat, int len)
 	return	ret == 1 ? 0 : -EIO;
 }
 
-int mxl301rf_w_tuner(struct dvb_frontend *fe, const u8 *dat, int len)
+static int mxl301rf_w_tuner(struct dvb_frontend *fe, const u8 *dat, int len)
 {
 	u8	*buf	= kzalloc(len + 1, GFP_KERNEL);
 	int	ret;
@@ -44,7 +44,7 @@ int mxl301rf_w_tuner(struct dvb_frontend *fe, const u8 *dat, int len)
 	return ret;
 }
 
-u8 mxl301rf_r(struct dvb_frontend *fe, u8 regadr)
+static u8 mxl301rf_r(struct dvb_frontend *fe, u8 regadr)
 {
 	struct i2c_client	*d	= fe->demodulator_priv,
 				*t	= fe->tuner_priv;
@@ -63,7 +63,7 @@ enum mxl301rf_agc {
 	MXL301RF_AGC_MANUAL,
 };
 
-int mxl301rf_set_agc(struct dvb_frontend *fe, enum mxl301rf_agc agc)
+static int mxl301rf_set_agc(struct dvb_frontend *fe, enum mxl301rf_agc agc)
 {
 	u8	dat	= agc == MXL301RF_AGC_AUTO ? 0x40 : 0x00,
 		imsrst	= 0x01 << 6;
@@ -75,7 +75,7 @@ int mxl301rf_set_agc(struct dvb_frontend *fe, enum mxl301rf_agc agc)
 		mxl301rf_w(fe, 0x01, &imsrst, 1);
 }
 
-int mxl301rf_sleep(struct dvb_frontend *fe)
+static int mxl301rf_sleep(struct dvb_frontend *fe)
 {
 	u8	buf	= (1 << 7) | (1 << 4),
 		dat[]	= {0x01, 0x00, 0x13, 0x00};
@@ -87,7 +87,7 @@ int mxl301rf_sleep(struct dvb_frontend *fe)
 	return mxl301rf_w(fe, 0x03, &buf, 1);
 }
 
-int mxl301rf_tune(struct dvb_frontend *fe)
+static int mxl301rf_tune(struct dvb_frontend *fe)
 {
 	struct shf_dvbt {
 		u32	freq,		/* Channel center frequency @ kHz	*/
@@ -185,7 +185,7 @@ int mxl301rf_tune(struct dvb_frontend *fe)
 	return -ETIMEDOUT;
 }
 
-int mxl301rf_wakeup(struct dvb_frontend *fe)
+static int mxl301rf_wakeup(struct dvb_frontend *fe)
 {
 	u8	buf	= (1 << 7) | (0 << 4),
 		dat[2]	= {0x01, 0x01};
@@ -197,7 +197,7 @@ int mxl301rf_wakeup(struct dvb_frontend *fe)
 	return 0;
 }
 
-int mxl301rf_probe(struct i2c_client *t, const struct i2c_device_id *id)
+static int mxl301rf_probe(struct i2c_client *t)
 {
 	struct dvb_frontend	*fe	= t->dev.platform_data;
 	u8			d[]	= {0x10, 0x01};

@@ -90,7 +90,7 @@ struct pxq3pe_adap {
 		sBufByteCnt;
 };
 
-bool pxq3pe_i2c_clean(void __iomem *bar)
+static bool pxq3pe_i2c_clean(void __iomem *bar)
 {
 	if ((readl(bar + PXQ3PE_I2C_FIFO_STAT) & 0x1F) != 0x10 || readl(bar + PXQ3PE_I2C_FIFO_STAT) & 0x1F00)
 		return false;
@@ -98,7 +98,7 @@ bool pxq3pe_i2c_clean(void __iomem *bar)
 	return true;
 }
 
-bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen, u8 mode)
+static bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen, u8 mode)
 {
 	struct pxq3pe_card *c	= card->priv;
 	void __iomem	*bar	= c->bar;
@@ -129,9 +129,13 @@ bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen,
 	}
 	writel((slvadr << 8) + regadr, bar + PXQ3PE_I2C_ADR);
 	for (i = 0; i < 16 && i < bytelen; i += 4) {
-		msleep(0);
+		udelay(50);	/* was msleep(0): on kernel >=6.12 a scheduler yield mid-transaction
+				 * makes the slow tuner-gateway I2C (MOD_TUNER, via the demod repeater)
+				 * never complete; a busy-wait keeps the FIFO->START timing deterministic */
 		writel(*((u32 *)(wdat + i)), bar + PXQ3PE_I2C_FIFO_DATA);
 	}
+	readl(bar + PXQ3PE_I2C_FIFO_STAT);	/* flush posted FIFO writes before issuing START */
+	udelay(50);
 	writew((bytelen << 8) + i2cCtlByte, bar + PXQ3PE_I2C_CTL_STAT);
 	for (j = 0; j != 1000; j++) {
 		if (i < bytelen) {
@@ -155,7 +159,7 @@ bool pxq3pe_w(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *wdat, u8 bytelen,
 	return j < 1000 ? !(readl(bar + PXQ3PE_I2C_CTL_STAT) & 0x280000) : false;
 }
 
-bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen, u8 mode)
+static bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen, u8 mode)
 {
 	struct pxq3pe_card *c	= card->priv;
 	void __iomem	*bar	= c->bar;
@@ -226,15 +230,15 @@ bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 bytelen,
 	return !(readl(bar + PXQ3PE_I2C_FIFO_STAT) & 0x1F00) && ret;
 }
 
-int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
+static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 {
 	struct ptx_card	*card	= i2c_get_adapdata(i2c);
-	u8		i;
+	int		i;
 	bool		ret	= true;
 
 	if (!i2c || !card || !msg)
 		return -EINVAL;
-	for (i = 0; i < sz && ret; i++, msg++) {
+	for (i = 0; i < sz; i++, msg++) {
 		u8	regadr	= msg->addr >> 8,
 			slvadr	= (msg->addr & 0xFF) == PXQ3PE_I2C_ADR_GPIO ? PXQ3PE_I2C_ADR_GPIO
 				: (msg->addr & 0x80) | ((msg->addr >> 1) & 7),
@@ -244,21 +248,28 @@ int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 
 		mutex_lock(&card->lock);
 		if (msg->flags & I2C_M_RD) {
-			u8 *buf	= kzalloc(sz, GFP_KERNEL);
+			u8 *buf	= kzalloc(msg->len, GFP_KERNEL);
 
-			if (!buf)
+			if (!buf) {
+				mutex_unlock(&card->lock);
 				return -ENOMEM;
+			}
 			ret	= pxq3pe_r(card, slvadr, regadr, buf, msg->len, mode);
 			memcpy(msg->buf, buf, msg->len);
 			kfree(buf);
 		} else
 			ret = pxq3pe_w(card, slvadr, regadr, msg->buf, msg->len, mode);
 		mutex_unlock(&card->lock);
+		if (!ret)		/* stop before i++; i = messages actually transferred */
+			break;
 	}
+	/* i2c_transfer() contract: return the number of messages transferred so a
+	 * single-message write NAK is reported as failure (i < sz), not success.
+	 */
 	return i;
 }
 
-bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
+static bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
 {
 	u8	val;
 	struct i2c_msg msg[] = {
@@ -270,7 +281,7 @@ bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)
 		(val = (mask & dat) | (val & ~mask), i2c_transfer(&card->i2c, msg + 1, 1) == 1);
 }
 
-void pxq3pe_w_gpio1(struct ptx_card *card, u8 dat, u8 mask)
+static void pxq3pe_w_gpio1(struct ptx_card *card, u8 dat, u8 mask)
 {
 	struct pxq3pe_card *c = card->priv;
 
@@ -278,7 +289,7 @@ void pxq3pe_w_gpio1(struct ptx_card *card, u8 dat, u8 mask)
 	writeb((readb(c->bar + 0x890) & ~mask) | ((dat << 3) & mask), c->bar + 0x890);
 }
 
-void pxq3pe_w_gpio0(struct ptx_card *card, u8 dat, u8 mask)
+static void pxq3pe_w_gpio0(struct ptx_card *card, u8 dat, u8 mask)
 {
 	struct pxq3pe_card *c = card->priv;
 
@@ -286,7 +297,7 @@ void pxq3pe_w_gpio0(struct ptx_card *card, u8 dat, u8 mask)
 	writeb((mask & dat) | (readb(c->bar + 0x894) & ~mask), c->bar + 0x894);
 }
 
-void pxq3pe_power(struct ptx_card *card, bool ON)
+static void pxq3pe_power(struct ptx_card *card, bool ON)
 {
 	if (ON) {
 		pxq3pe_w_gpio0(card, 1, 1);
@@ -300,6 +311,7 @@ void pxq3pe_power(struct ptx_card *card, bool ON)
 		pxq3pe_w_gpio2(card, 4, 4);
 		pxq3pe_w_gpio2(card, 0, 4);
 		pxq3pe_w_gpio2(card, 4, 4);
+		msleep(20);	/* let tuner xtal/PLL settle before probe hammers I2C + reads lock bits */
 	} else {
 		pxq3pe_w_gpio0(card, 0, 1);
 		pxq3pe_w_gpio0(card, 1, 1);
@@ -307,7 +319,30 @@ void pxq3pe_power(struct ptx_card *card, bool ON)
 	}
 }
 
-irqreturn_t pxq3pe_irq(int irq, void *ctx)
+static void pxq3pe_dma_put_stream(struct pxq3pe_adap *p)
+{
+	u8	*src	= p->tBuf;
+	u32	len	= p->tBufIdx,
+		savesz	= len <= p->sBufSize - p->sBufStop ? len : p->sBufSize - p->sBufStop,
+		remain	= len - savesz;
+
+	memcpy(&p->sBuf[p->sBufStop], src, savesz);
+	if (remain)
+		memcpy(p->sBuf, &src[savesz], remain);
+	p->sBufStop = (p->sBufStop + len) % p->sBufSize;
+	if (p->sBufByteCnt == p->sBufSize)
+		p->sBufStart = p->sBufStop;
+	else {
+		if (p->sBufSize >= p->sBufByteCnt + len)
+			p->sBufByteCnt += len;
+		else {
+			p->sBufStart = p->sBufStop;
+			p->sBufByteCnt = p->sBufSize;
+		}
+	}
+}
+
+static irqreturn_t pxq3pe_irq(int irq, void *ctx)
 {
 	struct ptx_card		*card	= ctx;
 	struct pxq3pe_card	*c	= card->priv;
@@ -319,29 +354,6 @@ irqreturn_t pxq3pe_irq(int irq, void *ctx)
 		port	= irqstat & 0b0011 ? 0 : 1;
 	u8	*tbuf	= c->dma.dat + PKT_BUFSZ * (port * 2 + ch);
 
-	void pxq3pe_dma_put_stream(struct pxq3pe_adap *p)
-	{
-		u8	*src	= p->tBuf;
-		u32	len	= p->tBufIdx,
-			savesz	= len <= p->sBufSize - p->sBufStop ? len : p->sBufSize - p->sBufStop,
-			remain	= len - savesz;
-
-		memcpy(&p->sBuf[p->sBufStop], src, savesz);
-		if (remain)
-			memcpy(p->sBuf, &src[savesz], remain);
-		p->sBufStop = (p->sBufStop + len) % p->sBufSize;
-		if (p->sBufByteCnt == p->sBufSize)
-			p->sBufStart = p->sBufStop;
-		else {
-			if (p->sBufSize >= p->sBufByteCnt + len)
-				p->sBufByteCnt += len;
-			else {
-				p->sBufStart = p->sBufStop;
-				p->sBufByteCnt = p->sBufSize;
-			}
-		}
-	}
-
 	if (!(irqstat & 0b1111))
 		return IRQ_HANDLED;
 	writel(irqstat, bar + PXQ3PE_IRQ_CLEAR);
@@ -350,10 +362,14 @@ irqreturn_t pxq3pe_irq(int irq, void *ctx)
 		for (i = 0; i < PKT_BUFSZ; i += PTX_TS_SIZE) {
 			u8 idx = !port * 4 + (tbuf[i] == 0xC7 ? 0 : tbuf[i] == 0x47 ?
 					1 : tbuf[i] == 0x07 ? 2 : tbuf[i] == 0x87 ? 3 : card->adapn);
-			struct ptx_adap		*adap	= &card->adap[idx];
-			struct pxq3pe_adap	*p	= adap->priv;
+			struct ptx_adap		*adap;
+			struct pxq3pe_adap	*p;
 
-			if (idx < card->adapn && adap->ON) {
+			if (idx >= card->adapn)		/* unknown TS header: deref only after this guard */
+				continue;
+			adap	= &card->adap[idx];
+			p	= adap->priv;
+			if (adap->ON) {
 				tbuf[i] = PTX_TS_SYNC;
 				memcpy(&p->tBuf[p->tBufIdx], &tbuf[i], PTX_TS_SIZE);
 				p->tBufIdx += PTX_TS_SIZE;
@@ -368,7 +384,7 @@ irqreturn_t pxq3pe_irq(int irq, void *ctx)
 	return IRQ_HANDLED;
 }
 
-int pxq3pe_thread(void *dat)
+static int pxq3pe_thread(void *dat)
 {
 	struct ptx_adap		*adap	= dat;
 	struct pxq3pe_adap	*p	= adap->priv;
@@ -402,7 +418,7 @@ int pxq3pe_thread(void *dat)
 	return 0;
 }
 
-int pxq3pe_dma(struct ptx_adap *adap, bool ON)
+static int pxq3pe_dma(struct ptx_adap *adap, bool ON)
 {
 	struct ptx_card		*card	= adap->card;
 	struct pxq3pe_card	*c	= card->priv;
@@ -456,12 +472,12 @@ int pxq3pe_dma(struct ptx_adap *adap, bool ON)
 	return 0;
 }
 
-void pxq3pe_lnb(struct ptx_card *card, bool lnb)
+static void pxq3pe_lnb(struct ptx_card *card, enum fe_sec_voltage voltage)
 {
-	pxq3pe_w_gpio2(card, lnb ? 0x20 : 0, 0x20);
+	pxq3pe_w_gpio2(card, voltage == SEC_VOLTAGE_OFF ? 0 : 0x20, 0x20);
 }
 
-void pxq3pe_remove(struct pci_dev *pdev)
+static void pxq3pe_remove(struct pci_dev *pdev)
 {
 	struct ptx_card		*card	= pci_get_drvdata(pdev);
 	struct ptx_adap		*adap;
@@ -472,7 +488,9 @@ void pxq3pe_remove(struct pci_dev *pdev)
 	if (!card)
 		return;
 	c	= card->priv;
-	for (i = 0, adap = card->adap; adap->fe && i < card->adapn; i++, adap++) {
+	for (i = 0, adap = card->adap; i < card->adapn; i++, adap++) {
+		if (!adap->fe)		/* frontend probe was skipped: pxq3pe_dma()/ptx_sleep() deref adap->fe */
+			continue;
 		pxq3pe_dma(adap, false);
 		ptx_sleep(adap->fe);
 	}
@@ -515,7 +533,7 @@ static int pxq3pe_probe(struct pci_dev *pdev, const struct pci_device_id *pci_id
 	};
 	struct ptx_card		*card	= ptx_alloc(pdev, KBUILD_MODNAME, ARRAY_SIZE(pxq3pe_subdev_info),
 						sizeof(struct pxq3pe_card), sizeof(struct pxq3pe_adap), pxq3pe_lnb);
-	struct pxq3pe_card	*c	= card->priv;
+	struct pxq3pe_card	*c;
 	u8	regctl	= 0xA0,
 		i;
 	u16	cfg;
@@ -523,6 +541,7 @@ static int pxq3pe_probe(struct pci_dev *pdev, const struct pci_device_id *pci_id
 
 	if (err)
 		return ptx_abort(pdev, pxq3pe_remove, err, "Memory/PCI error, card=%p", card);
+	c	= card->priv;	/* deref only after the !card check above */
 	if (!(cfg & PCI_COMMAND_MASTER)) {
 		pci_set_master(pdev);
 		pci_read_config_word(pdev, PCI_COMMAND, &cfg);

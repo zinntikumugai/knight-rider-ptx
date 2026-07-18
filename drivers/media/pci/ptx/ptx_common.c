@@ -10,21 +10,23 @@ MODULE_AUTHOR(PTX_AUTH);
 MODULE_DESCRIPTION("Common DVB registration procedures");
 MODULE_LICENSE("GPL");
 
-void ptx_lnb(struct ptx_card *card)
+static void ptx_lnb(struct ptx_card *card, enum fe_sec_voltage voltage)
+{
+	if (card->lnb_vol != voltage) {
+		card->lnb(card, voltage);
+		card->lnb_vol = voltage;
+	}
+}
+
+static void ptx_lnb_auto(struct ptx_card *card)
 {
 	struct ptx_adap	*adap;
 	int	i;
-	bool	lnb = false;
 
-	for (i = 0, adap = card->adap; adap->fe && i < card->adapn; i++, adap++)
-		if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS && adap->ON) {
-			lnb = true;
-			break;
-	}
-	if (card->lnbON != lnb) {
-		card->lnb(card, lnb);
-		card->lnbON = lnb;
-	}
+	for (i = 0, adap = card->adap; i < card->adapn; i++, adap++)
+		if (adap->fe && adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS && adap->ON)
+			return;
+	ptx_lnb(card, SEC_VOLTAGE_OFF);
 }
 
 int ptx_sleep(struct dvb_frontend *fe)
@@ -32,7 +34,7 @@ int ptx_sleep(struct dvb_frontend *fe)
 	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
 
 	adap->ON = false;
-	ptx_lnb(adap->card);
+	ptx_lnb_auto(adap->card);
 	return adap->fe_sleep ? adap->fe_sleep(fe) : 0;
 }
 
@@ -41,33 +43,67 @@ int ptx_wakeup(struct dvb_frontend *fe)
 	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
 
 	adap->ON = true;
-	ptx_lnb(adap->card);
+	if (adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS)
+		ptx_lnb(adap->card, SEC_VOLTAGE_13);
 	return adap->fe_wakeup ? adap->fe_wakeup(fe) : 0;
 }
 
-int ptx_stop_feed(struct dvb_demux_feed *feed)
+static int ptx_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
+{
+	struct ptx_adap	*adap	= container_of(fe->dvb, struct ptx_adap, dvb);
+
+	switch (voltage) {
+	case SEC_VOLTAGE_13:
+	case SEC_VOLTAGE_18:
+	case SEC_VOLTAGE_OFF:
+		ptx_lnb(adap->card, voltage);
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
+/* BS/CS110 does not use 22kHz tone (no DiSEqC) */
+static int ptx_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
+{
+	return 0;
+}
+
+static int ptx_stop_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
 
+	if (!adap->fe)		/* skipped adapter (frontend probe failed): no feed was started */
+		return 0;
+	if (--adap->nfeeds)
+		return 0;
 	adap->card->dma(adap, false);
 	if (adap->kthread)
 		kthread_stop(adap->kthread);
 	return 0;
 }
 
-int ptx_start_feed(struct dvb_demux_feed *feed)
+static int ptx_start_feed(struct dvb_demux_feed *feed)
 {
 	struct ptx_adap	*adap	= container_of(feed->demux, struct ptx_adap, demux);
+	int err;
 
+	if (!adap->fe)		/* skipped adapter has no frontend/tuner: refuse (avoids adap->fe deref below) */
+		return -ENODEV;
+	if (adap->nfeeds++)
+		return 0;
 	if (adap->card->thread)
 		adap->kthread = kthread_run(adap->card->thread, adap, "%s_%d%c", adap->dvb.name, adap->dvb.num,
 					adap->fe->dtv_property_cache.delivery_system == SYS_ISDBS ? 's' :
 					adap->fe->dtv_property_cache.delivery_system == SYS_ISDBT ? 't' : 'u');
-	return IS_ERR(adap->kthread) ? PTR_ERR(adap->kthread) : adap->card->dma(adap, true);
+	err = IS_ERR(adap->kthread) ? PTR_ERR(adap->kthread) : adap->card->dma(adap, true);
+	if (err)
+		adap->nfeeds--;
+	return err;
 }
 
 struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card_priv, u32 sz_adap_priv,
-			void (*lnb)(struct ptx_card *, bool))
+			void (*lnb)(struct ptx_card *, enum fe_sec_voltage))
 {
 	u8 i;
 	struct ptx_card *card = kzalloc(sizeof(struct ptx_card) + sz_card_priv
@@ -79,7 +115,7 @@ struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card
 	card->pdev	= pdev;
 	card->adapn	= adapn;
 	card->name	= name;
-	card->lnbON	= true;
+	card->lnb_vol	= SEC_VOLTAGE_13;
 	card->lnb	= lnb;
 	for (i = 0; i < adapn; i++) {
 		struct ptx_adap *p = &card->adap[i];
@@ -87,10 +123,14 @@ struct ptx_card *ptx_alloc(struct pci_dev *pdev, u8 *name, u8 adapn, u32 sz_card
 		p->card	= card;
 		p->priv	= sz_adap_priv ? (u8 *)&card->adap[adapn] + i * sz_adap_priv : NULL;
 	}
-	if (pci_enable_device(pdev)					||
-		pci_set_dma_mask(pdev, DMA_BIT_MASK(32))		||
-		pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32))	||
+	if (pci_enable_device(pdev)) {
+		kfree(card);
+		return NULL;
+	}
+	if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))			||
+		dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32))	||
 		pci_request_regions(pdev, name)) {
+		pci_disable_device(pdev);	/* undo the successful enable above */
 		kfree(card);
 		return NULL;
 	}
@@ -104,13 +144,13 @@ int ptx_i2c_add_adapter(struct ptx_card *card, const struct i2c_algorithm *algo)
 
 	i2c->algo	= algo;
 	i2c->dev.parent	= &card->pdev->dev;
-	strcpy(i2c->name, card->name);
+	strscpy(i2c->name, card->name, sizeof(i2c->name));
 	i2c_set_adapdata(i2c, card);
 	mutex_init(&card->lock);
 	return	i2c_add_adapter(i2c);
 }
 
-void ptx_unregister_subdev(struct i2c_client *c)
+static void ptx_unregister_subdev(struct i2c_client *c)
 {
 	if (!c)
 		return;
@@ -119,7 +159,7 @@ void ptx_unregister_subdev(struct i2c_client *c)
 	i2c_unregister_device(c);
 }
 
-void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 adr, char *name)
+static void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 adr, char *name)
 {
 	struct i2c_client	*c;
 	struct i2c_board_info	info = {
@@ -127,7 +167,7 @@ void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 a
 		.addr		= adr,
 	};
 
-	strlcpy(info.type, name, I2C_NAME_SIZE);
+	strscpy(info.type, name, I2C_NAME_SIZE);
 	pr_info("%s %s", __func__, info.type);
 	if (request_module("%s", info.type) < 0) {
 		pr_err("%s ERROR request_module %s", __func__, info.type);
@@ -141,6 +181,16 @@ void ptx_register_subdev(struct i2c_adapter *i2c, struct dvb_frontend *fe, u16 a
 	if (c->dev.driver && try_module_get(c->dev.driver->owner))
 		return;
 	pr_err("%s ERROR Please insmod %s.ko first", __func__, info.type);
+	/* A failed subdev probe may have set fe->{tuner,demodulator}_priv = c
+	 * before erroring out (e.g. tda2014x_probe sets tuner_priv before its
+	 * I2C init). i2c_unregister_device(c) below frees c, so clear any such
+	 * dangling reference — otherwise ptx_register_fe()'s !priv check passes
+	 * and a broken frontend gets registered, crashing on the first tune.
+	 */
+	if (fe->tuner_priv == c)
+		fe->tuner_priv = NULL;
+	if (fe->demodulator_priv == c)
+		fe->demodulator_priv = NULL;
 	ptx_unregister_subdev(c);
 }
 
@@ -166,6 +216,15 @@ struct dvb_frontend *ptx_register_fe(struct i2c_adapter *i2c, struct dvb_adapter
 	ptx_register_subdev(i2c, fe, info->tuner_addr, info->tuner_name);
 	for (i = 0; i < MAX_DELSYS; i++)
 		fe->ops.delsys[i] = info->delsys[i];
+	if (info->delsys[0] == SYS_ISDBS) {
+		fe->ops.set_voltage		= ptx_set_voltage;
+		fe->ops.set_tone		= ptx_set_tone;
+		fe->ops.info.frequency_min_hz	= 1;		/* /kHz=0: skip range check	*/
+		fe->ops.info.frequency_max_hz	= 999;		/* /kHz=0: LNB underflow safe	*/
+	} else {
+		fe->ops.info.frequency_min_hz	= 1;		/* ch num (1~) passthrough	*/
+		fe->ops.info.frequency_max_hz	= 1000000000;	/* 1 GHz: all ISDB-T bands	*/
+	}
 	if (!fe->demodulator_priv || !fe->tuner_priv || (dvb && dvb_register_frontend(dvb, fe))) {
 		ptx_unregister_fe(fe);
 		return	NULL;
@@ -223,20 +282,27 @@ int ptx_register_adap(struct ptx_card *card, const struct ptx_subdev_info *info,
 			return -ENFILE;
 		}
 		demux->dmx.capabilities = DMX_TS_FILTERING | DMX_SECTION_FILTERING;
-		demux->feednum		= 1;
-		demux->filternum	= 1;
+		demux->feednum		= 256;
+		demux->filternum	= 256;
 		demux->start_feed	= ptx_start_feed;
 		demux->stop_feed	= ptx_stop_feed;
 		if (dvb_dmx_init(demux) < 0)
 			return -ENOMEM;
-		dmxdev->filternum	= 1;
+		dmxdev->filternum	= 256;
 		dmxdev->demux		= &demux->dmx;
 		err			= dvb_dmxdev_init(dmxdev, dvb);
 		if (err)
 			return err;
 		adap->fe		= ptx_register_fe(&adap->card->i2c, &adap->dvb, &info[i]);
-		if (!adap->fe)
-			return -ENOMEM;
+		if (!adap->fe) {
+			/* demod/tuner probe failed (e.g. tuner not responding): skip
+			 * this adapter but keep the others usable. The dvb/demux/dmxdev
+			 * registered above stay registered and are freed in
+			 * ptx_unregister_adap(); teardown loops skip NULL-fe adapters.
+			 */
+			pr_err("%s %s adapter %d: frontend probe failed, skipping", __func__, card->name, num);
+			continue;
+		}
 		adap->fe_sleep		= adap->fe->ops.sleep;
 		adap->fe_wakeup		= adap->fe->ops.init;
 		adap->fe->ops.sleep	= ptx_sleep;

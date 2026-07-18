@@ -4,10 +4,11 @@
 	Copyright (C) Budi Rachmanto, AreMa Inc. <info@are.ma>
 */
 
+#include <linux/delay.h>
 #include <media/dvb_frontend.h>
 #include "tda2014x.h"
 
-int tda2014x_r(struct i2c_client *c, u8 slvadr)
+static int tda2014x_r(struct i2c_client *c, u8 slvadr)
 {
 	u8	buf[]	= {0xFE, 0xA8, slvadr},
 		rcmd[]	= {0xFE, 0xA9},
@@ -20,10 +21,10 @@ int tda2014x_r(struct i2c_client *c, u8 slvadr)
 	return i2c_transfer(c->adapter, msg, 3) == 3 ? ret : -EREMOTEIO;
 }
 
-bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *rdat)
+static bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *rdat)
 {
-	u8	mask	= nbits > 7 ? 0xFF : ((1 << nbits) - 1) << start_bit,
-		val	= tda2014x_r(c, slvadr);
+	u8	mask	= nbits > 7 ? 0xFF : ((1 << nbits) - 1) << start_bit;
+	int	val	= tda2014x_r(c, slvadr);	/* int: tda2014x_r() may return -EREMOTEIO */
 
 	if (val < 0)
 		return false;
@@ -31,7 +32,7 @@ bool tda2014x_r8(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 *r
 	return true;
 }
 
-bool tda2014x_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
+static bool tda2014x_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
 {
 	u8		buf[]	= {slvadr, dat};
 	struct i2c_msg	msg[]	= {
@@ -40,7 +41,7 @@ bool tda2014x_w8(struct i2c_client *c, u8 slvadr, u8 dat)	// tc90522_i2c_w_tuner
 	return i2c_transfer(c->adapter, msg, 1) == 1;
 }
 
-bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 nbytes, bool rmw, u8 access, u16 wdat)
+static bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 nbytes, bool rmw, u8 access, u16 wdat)
 {
 	u16	mask	= nbits > 15 ? 0xFFFF : ((1 << nbits) - 1) << start_bit,
 		val	= mask & (wdat << start_bit);
@@ -48,8 +49,8 @@ bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 n
 		i;
 
 	for (i = 0, nbytes = !nbytes ? 1 : nbytes > 2 ? 2 : nbytes; access & 2 && nbytes; i++, nbytes--) {
-		u8	buf[]	= {0xFE, 0xA8, slvadr + i, 0},
-			ret	= tda2014x_r(c, slvadr + i);
+		u8	buf[]	= {0xFE, 0xA8, slvadr + i, 0};
+		int	ret	= tda2014x_r(c, slvadr + i);	/* int: may return -EREMOTEIO */
 		struct i2c_msg msg[] = {
 			{.addr = c->addr,	.flags = 0,	.buf = buf,	.len = 4,},
 		};
@@ -66,24 +67,41 @@ bool tda2014x_w16(struct i2c_client *c, u16 slvadr, u8 start_bit, u8 nbits, u8 n
 	return true;
 }
 
-int tda2014x_tune(struct dvb_frontend *fe)
+/* Poll a tuner PLL/VCO lock bit with a real settling budget (~50ms). The
+ * original code read the lock bit 2-3 times back-to-back with no delay, which
+ * races the analog PLL on faster kernels/buses (intermittent probe -EIO).
+ */
+static bool tda2014x_wait_lock(struct i2c_client *c, u16 slvadr, u8 start_bit)
 {
-	u64 div10(u64 n, u8 pow)
-	{
-		u64	q, r;
+	u8	val;
+	int	i;
 
-		while (pow--) {
-			q = (n >> 1) + (n >> 2);
-			q = q + (q >> 4);
-			q = q + (q >> 8);
-			q = q + (q >> 16);
-			q = q >> 3;
-			r = n - (((q << 2) + q) << 1);
-			n = q + (r > 9);
-		}
-		return n;
+	for (i = 0; i < 50; i++) {
+		if (tda2014x_r8(c, slvadr, start_bit, 1, &val) && val)
+			return true;
+		msleep(1);
 	}
+	return false;
+}
 
+static u64 tda2014x_div10(u64 n, u8 pow)
+{
+	u64	q, r;
+
+	while (pow--) {
+		q = (n >> 1) + (n >> 2);
+		q = q + (q >> 4);
+		q = q + (q >> 8);
+		q = q + (q >> 16);
+		q = q >> 3;
+		r = n - (((q << 2) + q) << 1);
+		n = q + (r > 9);
+	}
+	return n;
+}
+
+static int tda2014x_tune(struct dvb_frontend *fe)
+{
 	enum {
 		TDA2014X_LNA_GAIN_7dB	= 0x0,
 		TDA2014X_LNA_GAIN_10dB	= 0x1,
@@ -148,7 +166,7 @@ int tda2014x_tune(struct dvb_frontend *fe)
 
 	ResLsb = (8 - i) * f_kHz * 1000UL / 27UL;	/* Xtal 27 MHz */
 	kint = ResLsb;
-	v15 = div10(ResLsb, 6);
+	v15 = tda2014x_div10(ResLsb, 6);
 	R = 1;
 	Premain = 1;
 	Nint = (v15 * R) >> Premain;
@@ -195,15 +213,15 @@ LABEL_36:
 	default:
 		return -ERANGE;
 	}
-	kint		= div10(kint, 1) * 10;
+	kint		= tda2014x_div10(kint, 1) * 10;
 	ePllRefClkRatio	= R == 2 ? 1 : R == 3 ? 2 : 0;
 	PredividerRatio	= Premain == 1 ? 0 : 1;
-	DsmIntInReg	= div10(kint, 6);
+	DsmIntInReg	= tda2014x_div10(kint, 6);
 	DsmFracInReg	= kint - 1000000 * DsmIntInReg;
 	for (i = 0; i < 16; i++) {
 		DsmFracInReg *= 2;
 		if (DsmFracInReg > 0xFFFFFFF && i != 15) {
-			DsmFracInReg = div10(DsmFracInReg, 1);
+			DsmFracInReg = tda2014x_div10(DsmFracInReg, 1);
 			CalcPow--;
 		}
 	}
@@ -217,7 +235,7 @@ LABEL_36:
 		/* SetPllDividerConfig */
 		tda2014x_w16(c, 0x1A, 5, 1, 0, 1, 6, PredividerRatio)			&&
 		tda2014x_w16(c, 0x1E, 0, 8, 0, 0, 6, DsmIntInReg - 128)		&&
-		tda2014x_w16(c, 0x1F, 0, 0x10, 2, 0, 6, div10(DsmFracInReg, CalcPow))	&&
+		tda2014x_w16(c, 0x1F, 0, 0x10, 2, 0, 6, tda2014x_div10(DsmFracInReg, CalcPow))	&&
 
 		/* ProgramVcoChannelChange */
 		tda2014x_r8(c, 0x12, 0, 8, &val)				&&
@@ -228,8 +246,7 @@ LABEL_36:
 		tda2014x_w16(c, 0x13, 5, 1, 0, 1, 6, 1)			&&
 		tda2014x_w16(c, 0x13, 7, 1, 0, 1, 6, 0)			&&
 		tda2014x_w16(c, 0x13, 4, 1, 0, 1, 6, 1)			&&
-		((tda2014x_r8(c, 0x15, 4, 1, &val) && val == 1)		||
-		(tda2014x_r8(c, 0x15, 4, 1, &val) && val == 1))		&&
+		tda2014x_wait_lock(c, 0x15, 4)				&&	/* VCO cal lock (was 2x no-delay reads) */
 		tda2014x_w16(c, 0x13, 4, 1, 0, 1, 6, 0)			&&
 		tda2014x_r8(c, 0x12, 0, 8, &val)				&&
 		tda2014x_w16(c, 0x12, 0, 8, 0, 0, 6, val & 0x7F)		&&
@@ -252,7 +269,7 @@ LABEL_36:
 		tda2014x_w8(c, 3, 1)) * -EIO;
 }
 
-int tda2014x_probe(struct i2c_client *c, const struct i2c_device_id *id)
+static int tda2014x_probe(struct i2c_client *c)
 {
 	u8			val	= 0;
 	struct dvb_frontend	*fe	= c->dev.platform_data;
@@ -328,10 +345,7 @@ int tda2014x_probe(struct i2c_client *c, const struct i2c_device_id *id)
 		tda2014x_w16(c, 0x10, 5, 1, 0, 1, 6, 1)			&&
 		tda2014x_w16(c, 0x10, 5, 1, 0, 1, 6, 1)			&&
 		tda2014x_w16(c, 0xF, 5, 1, 0, 1, 6, 1)				&&
-		tda2014x_r8(c, 0x11, 4, 1, &val)				&&
-		(val || tda2014x_r8(c, 0x11, 4, 1, &val))			&&
-		(val || tda2014x_r8(c, 0x11, 4, 1, &val))			&&
-		val								&&
+		tda2014x_wait_lock(c, 0x11, 4)					&&	/* PLL/VCO POR lock (was 3x no-delay reads) */
 		tda2014x_r8(c, 0x10, 0, 4, &val)				&&
 		tda2014x_w16(c, 0xF, 0, 4, 0, 1, 6, val)			&&
 		tda2014x_w16(c, 0xF, 6, 1, 0, 1, 6, 1)				&&

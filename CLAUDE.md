@@ -1,0 +1,147 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## プロジェクト概要
+
+Earthsoft PT3、PLEX PX-Q3PE、PX-BCUD 用の DVB ドライバ。ISDB-S/T 対応の Linux カーネルモジュール。
+
+## ビルドコマンド
+
+```bash
+# 通常ビルド
+make
+
+# デバッグビルド
+make debug
+
+# テスト実行
+make test
+
+# インストール（DKMS なし）
+make install
+
+# インストール（DKMS あり - 自動アップデート対応）
+chmod +x dkms.install dkms.uninstall
+./dkms.install
+
+# クリーン
+make clean
+
+# アンインストール
+make uninstall  # または ./dkms.uninstall
+```
+
+## Docker 環境でのビルド（Kernel 6.8.0 / 7.0 対応済み）
+
+このプロジェクトは Kernel 6.8.0（Ubuntu 24.04）と Kernel 7.0（Ubuntu 26.04）の両方に対応済みです。Docker を使用してビルド・テストできます：
+
+```bash
+# Docker イメージのビルド（デフォルト: Ubuntu 24.04 / kernel 6.8）
+docker build -t ptx-build .
+
+# Ubuntu 26.04 / kernel 7.0 向けイメージのビルド
+docker build --build-arg UBUNTU=26.04 --build-arg KSRC=7.0 -t ptx-build-7.0 .
+
+# コンテナでビルド環境を起動
+docker run -it --rm ptx-build
+
+# ホストからの Docker ビルドテスト
+make test                                  # Ubuntu 24.04 / kernel 6.8
+make test TEST_UBUNTU=26.04 TEST_KSRC=7.0  # Ubuntu 26.04 / kernel 7.0
+make test-all                              # 両方
+```
+
+### Kernel 6.8.0 対応修正内容
+
+- `media/dvb_math.h` → `linux/int_log.h` への移行
+- i2c_driver の probe/remove 関数シグネチャ変更対応
+- 非推奨 DMA API (`pci_alloc_consistent` など) の新 API への移行
+- `strlcpy` → `strscpy` への移行
+- 関数プロトタイプ警告の修正 (`static` 化)
+- pxq3pe_pci.c: I2C 読み込み時のバッファ割り当てサイズ修正（`kzalloc(sz, ...)` → `kzalloc(msg->len, ...)`）とmutex解放処理の修正
+
+### Kernel 7.0（Ubuntu 26.04）対応修正内容
+
+単一コードベースで 6.8 と 7.0 の両方に対応（`LINUX_VERSION_CODE` ガードは不要だった）：
+
+- GCC ネスト関数を file-scope の static 関数へ引き上げ（tc90522.c, pt3_pci.c, pxq3pe_pci.c, tda2014x.c）。
+  kernel 6.13+ の LD 段階 objtool 検証（IBT/ORC）でエラーになるため
+- `ldflags-y += -s` を削除。シンボルを strip すると objtool が
+  "unannotated intra-function call" で失敗する（サイズ削減は `make install` 時の `strip --strip-debug` で実施）
+- kbuild の相対 `-I` パスを `$(srctree)/` 前置に修正（kernel 6.13 で外部モジュールビルドの
+  作業ディレクトリがモジュールディレクトリに変更されたため）
+- Dockerfile を `--build-arg UBUNTU=<ver> KSRC=<ver>` でパラメータ化
+- CI（GitHub Actions）を 24.04/6.8 と 26.04/7.0 の matrix 構成に変更し、
+  全 7 モジュールの .ko 生成を成功条件化
+
+注意: kernel 7.0 対応はビルド対象モジュール（DVB 版）のみ。dkms.conf で無効化中の
+chardev 版（drivers/video）と em28xx（PX-BCUD）にはネスト関数等が残っており、
+コメント解除しても kernel 6.13+ ではビルドできない（対応には大規模な書き直しが必要）。
+
+## コード品質チェック
+
+```bash
+make check  # checkpatch.pl と smatch（インストール済みの場合）を実行
+```
+
+## アーキテクチャ
+
+### ディレクトリ構造
+
+- `drivers/media/`: DVB ドライバ本体
+  - `dvb-frontends/`: デモジュレータ (tc90522)
+  - `tuners/`: チューナードライバ群
+  - `pci/ptx/`: PCI ブリッジドライバ (pt3, pxq3pe)
+  - `usb/em28xx/`: USB ドライバ (PX-BCUD用)
+- `drivers/video/`: キャラクタデバイス版ドライバ（通常は無効）
+- `apps/`: ユーティリティツール
+  - `dvb/cmds/`: DVB ストリーム解析・操作ツール
+  - `cdev/recpt1/`: キャラクタデバイス用録画ツール
+
+### 主要モジュール
+
+| モジュール | チップ | 説明 |
+|----------|--------|------|
+| tc90522 | TC90522XBG, TC90532XBG | 共通デモジュレータ |
+| qm1d1c004x | QM1D1C0042, QM1D1C0045 | ISDB-S チューナー |
+| mxl301rf | MxL301RF | ISDB-T チューナー |
+| tda2014x | TDA20142 | ISDB-S チューナー (PX-Q3PE) |
+| nm131 | NM131, NM130, NM120 | ISDB-T チューナー (PX-Q3PE) |
+| pt3 | EP4CGX15BF14C8N | PT3 PCI ブリッジ |
+| pxq3pe | ASV5220 | PX-Q3PE PCI-E ブリッジ |
+
+### 開発上の注意点
+
+1. **PX-Q3PE のリセット**: warm boot では検出されないため、必ず電源を完全に切ってから起動する
+2. **I2C クライアント**: dvb_frontend の .demodulator_priv と .tuner_priv は i2c_client として扱う
+3. **共通処理**: ptx_common.c に DVB サブシステムへの登録処理がまとめられている
+
+## DKMS 設定
+
+`dkms.conf` でモジュールの配置先が定義されている：
+- フロントエンド → `/kernel/drivers/media/dvb-frontends`
+- チューナー → `/kernel/drivers/media/tuners`
+- PCI ドライバ → `/kernel/drivers/media/pci/ptx`
+
+## アプリケーションツール
+
+DVB 版ツール (`apps/dvb/cmds/`):
+- `nitdump`, `s2scan`, `tcscan`: チャンネルスキャン
+- `dumpts`, `ptsdump`: TS ストリーム解析
+- `fixpat`, `fixpcr`: TS ストリーム修正
+- `jzap`, `tune`, `tctune`: チューニング
+
+ビルド: `cd apps/dvb/cmds && make`
+
+## CI/CD
+
+### GitHub Actions
+
+`.github/workflows/build-test.yml` で自動ビルドテストが実行されます：
+
+- **トリガー**: push, pull request, 手動実行
+- **テスト内容**: `make test` を matrix 実行（Ubuntu 24.04/kernel 6.8 と Ubuntu 26.04/kernel 7.0 の 2 レグ）。
+  コンテナ内では Ubuntu の linux-headers-*-generic（完全な Module.symvers 付き）に対してビルドする
+- **成功判定**: 全 7 モジュール（tc90522, qm1d1c004x, mxl301rf, nm131, tda2014x, pt3, pxq3pe）の .ko 生成。
+  モジュールリストは dkms.conf の BUILT_MODULE_NAME から Makefile が導出する（CI 側に重複リストは持たない）
