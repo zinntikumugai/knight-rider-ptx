@@ -233,12 +233,12 @@ static bool pxq3pe_r(struct ptx_card *card, u8 slvadr, u8 regadr, u8 *rdat, u8 b
 static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 {
 	struct ptx_card	*card	= i2c_get_adapdata(i2c);
-	u8		i;
+	int		i;
 	bool		ret	= true;
 
 	if (!i2c || !card || !msg)
 		return -EINVAL;
-	for (i = 0; i < sz && ret; i++, msg++) {
+	for (i = 0; i < sz; i++, msg++) {
 		u8	regadr	= msg->addr >> 8,
 			slvadr	= (msg->addr & 0xFF) == PXQ3PE_I2C_ADR_GPIO ? PXQ3PE_I2C_ADR_GPIO
 				: (msg->addr & 0x80) | ((msg->addr >> 1) & 7),
@@ -260,11 +260,13 @@ static int pxq3pe_i2c_xfr(struct i2c_adapter *i2c, struct i2c_msg *msg, int sz)
 		} else
 			ret = pxq3pe_w(card, slvadr, regadr, msg->buf, msg->len, mode);
 		mutex_unlock(&card->lock);
+		if (!ret)		/* stop before i++; i = messages actually transferred */
+			break;
 	}
-	/* i was already incremented past the failing message; don't count it as
-	 * transferred, else a single-message write NAK reads back as success (==1).
+	/* i2c_transfer() contract: return the number of messages transferred so a
+	 * single-message write NAK is reported as failure (i < sz), not success.
 	 */
-	return ret ? i : i - 1;
+	return i;
 }
 
 static bool pxq3pe_w_gpio2(struct ptx_card *card, u8 dat, u8 mask)

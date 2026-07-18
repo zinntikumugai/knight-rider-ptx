@@ -416,13 +416,16 @@ static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!ret) {
 		/* pt3_power needs a live demod; the last adapter may have been
 		 * skipped (tuner probe failed), so pick the last one with a valid fe.
+		 * Index (not pointer) so we never form a pointer before the array base.
 		 */
-		for (adap = card->adap + card->adapn - 1; adap >= card->adap && !adap->fe; adap--)
+		int a;
+
+		for (a = card->adapn - 1; a >= 0 && !card->adap[a].fe; a--)
 			;
-		ret =	adap < card->adap ? -ENODEV				:
-			pt3_power(adap->fe, PT3_PWR_TUNER_ON)			||
+		ret =	a < 0 ? -ENODEV						:
+			pt3_power(card->adap[a].fe, PT3_PWR_TUNER_ON)		||
 			pt3_i2c_flush(c, PT3_I2C_START_ADDR)			||
-			pt3_power(adap->fe, PT3_PWR_TUNER_ON | PT3_PWR_AMP_ON);
+			pt3_power(card->adap[a].fe, PT3_PWR_TUNER_ON | PT3_PWR_AMP_ON);
 	}
 	return	ret ?
 		ptx_abort(pdev, pt3_remove, ret, "Unable to register I2C/DVB adapter/frontend") :
